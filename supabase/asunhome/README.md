@@ -40,7 +40,10 @@ vistas, matviews, RLS y policies, reapuntando toda referencia `ferrecolor.*`
 (y `zentra_erp.*` cuando el objeto existe en el origen) hacia `asunhome.*`.
 **No copia ninguna fila.**
 
-## Tablas nuevas respecto de Ferrecolor
+## Tablas nuevas (10)
+
+Verificadas contra el catálogo real de Ferrecolor: son las que efectivamente
+no existen ahí.
 
 | Tabla | Cubre |
 |---|---|
@@ -49,22 +52,35 @@ vistas, matviews, RLS y policies, reapuntando toda referencia `ferrecolor.*`
 | `producto_series` | venta por serial, carga de obs/nº de serie, trazabilidad a proveedor |
 | `productos_averiados` | producto averiado + de qué proveedor vino |
 | `servicio_tecnico_ordenes` / `_items` / `_historial` | servicio técnico |
-| `presupuestos` / `presupuestos_items` | hoja de presupuesto |
 | `ajustes_stock` / `_items` | ajustes de stock |
 | `ajuste_stock_autorizados` | usuario único de ajuste |
-| `caja_sesiones` / `caja_movimientos` | reporte de caja (y su export a Excel) |
 
-Columnas agregadas: `productos.marca_id`, `productos.linea_id`,
-`productos.maneja_series`, `productos.garantia_meses`, y en
-`movimientos_inventario` el par `ubicacion_origen_id` / `ubicacion_destino_id`
-+ `serie_id` para las transferencias salón ↔ depósito.
+## Tablas heredadas que se reconcilian (no se duplican)
+
+Ferrecolor tiene 125 tablas; `supabase/migrations/` solo documenta ~47. Estas
+ya existían y el script solo les agrega columnas:
+
+| Tabla | Se agrega |
+|---|---|
+| `productos` | `marca_id`, `linea_id`, `maneja_series`, `garantia_meses` |
+| `presupuestos` | `origen`, `orden_servicio_id`, `tipo_cambio`, `vendedor_id`, `vendedor_nombre`, `condiciones`, `created_by`, `updated_by` |
+| `presupuesto_items` (singular) | `orden`, `observaciones` |
+| `cajas` | `ubicacion_id` |
+| `caja_movimientos` | `orden_servicio_id`, `cliente_id` |
+| `movimientos_inventario` | `ubicacion_origen_id`, `ubicacion_destino_id`, `serie_id`, `ajuste_id`, `orden_servicio_id`, `observaciones` |
+
+Los CHECK de `movimientos_inventario` se **amplían** conservando los valores
+heredados (`produccion`, `devolucion_venta` incluidos); nunca se reemplazan.
+
+Descartado del diseño inicial por existir ya: `caja_sesiones` (se usa `cajas`)
+y `presupuestos_items` (se usa `presupuesto_items`).
 
 ## Vistas de reporte
 
 `v_reporte_ventas` · `v_reporte_stock` · `v_reporte_stock_ubicacion` ·
 `v_reporte_linea_producto` · `v_reporte_marca` · `v_reporte_proveedor` ·
 `v_costos_precios` · `v_reporte_caja` · `v_cliente_historial_compras` ·
-`v_trazabilidad_series`
+`v_trazabilidad_series` · `v_servicio_tecnico`
 
 ## Cosas a tener en cuenta
 

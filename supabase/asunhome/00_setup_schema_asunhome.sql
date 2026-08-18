@@ -500,22 +500,177 @@ SELECT public.neura_clonar_schema_estructura('ferrecolor', 'asunhome');
 
 
 -- =============================================================================
--- PARTE 3 — TABLAS Y COLUMNAS NUEVAS DEL ALCANCE ASUNHOME
+-- PARTE 3 — ALCANCE ASUNHOME SOBRE LA ESTRUCTURA HEREDADA
 --
--- Cubre lo que el schema heredado NO tenía:
---   marcas · líneas de producto · números de serie · productos averiados ·
---   servicio técnico · hoja de presupuesto · ajustes de stock con usuario único ·
---   caja · transferencias salón ↔ depósito
+-- Verificado contra el catálogo real de `ferrecolor` (125 tablas).
+-- NO se duplica nada que ya exista. Se reparte en dos grupos:
 --
--- Todo con IF NOT EXISTS: se puede re-ejecutar sin romper nada.
--- Las FKs se agregan solo si la tabla referenciada existe (PARTE 3.9).
+--   3.A  RECONCILIACIÓN de tablas que ya vienen del clon:
+--        presupuestos · presupuesto_items · cajas · caja_movimientos ·
+--        movimientos_inventario · productos
+--        → solo ADD COLUMN IF NOT EXISTS y ampliación de CHECKs.
+--
+--   3.B  TABLAS NUEVAS (10), que Ferrecolor no tiene:
+--        marcas · lineas_producto · producto_series · productos_averiados ·
+--        servicio_tecnico_ordenes/_items/_historial ·
+--        ajuste_stock_autorizados · ajustes_stock · ajustes_stock_items
+--
+-- Descartado respecto del borrador anterior, por existir ya en Ferrecolor:
+--   caja_sesiones      → se usa `cajas`
+--   presupuestos_items → se usa `presupuesto_items` (singular)
+--
+-- Todo idempotente. Las FKs se agregan al final (3.9) solo si el destino existe.
 -- =============================================================================
 
 SET search_path = asunhome, public, extensions, pg_catalog;
 
--- ── 3.1 Maestros: marcas y líneas de producto ───────────────────────────────
--- REPORTE MARCA / REPORTE LINEA DE PRODUCTOS
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 3.A RECONCILIACIÓN
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- 3.A.1 productos: marca, línea de producto, manejo de series, garantía
+ALTER TABLE asunhome.productos
+  ADD COLUMN IF NOT EXISTS marca_id       uuid,
+  ADD COLUMN IF NOT EXISTS linea_id       uuid,
+  ADD COLUMN IF NOT EXISTS maneja_series  boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS garantia_meses integer;
+
+CREATE INDEX IF NOT EXISTS idx_productos_marca ON asunhome.productos (marca_id);
+CREATE INDEX IF NOT EXISTS idx_productos_linea ON asunhome.productos (linea_id);
+
+
+-- 3.A.2 presupuestos (HOJA DE PRESUPUESTO)
+-- Heredada: numero_control, estado, moneda, subtotal, monto_iva, descuento_total,
+-- total, validez_dias, fecha, fecha_vencimiento, forma_pago, plazo_entrega,
+-- convertido_pedido_id, convertido_venta_id, datos snapshot del cliente.
+-- Falta para el alcance ASUNHOME: origen del presupuesto (venta vs servicio
+-- técnico), vínculo a la orden de servicio, vendedor, condiciones y tipo_cambio.
+ALTER TABLE asunhome.presupuestos
+  ADD COLUMN IF NOT EXISTS origen            text NOT NULL DEFAULT 'venta',
+  ADD COLUMN IF NOT EXISTS orden_servicio_id uuid,
+  ADD COLUMN IF NOT EXISTS tipo_cambio       numeric NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS vendedor_id       uuid,
+  ADD COLUMN IF NOT EXISTS vendedor_nombre   text,
+  ADD COLUMN IF NOT EXISTS condiciones       text,
+  ADD COLUMN IF NOT EXISTS created_by        uuid,
+  ADD COLUMN IF NOT EXISTS updated_by        uuid;
+
+DO $p$
+BEGIN
+  BEGIN
+    ALTER TABLE asunhome.presupuestos DROP CONSTRAINT IF EXISTS presupuestos_origen_check;
+    ALTER TABLE asunhome.presupuestos ADD CONSTRAINT presupuestos_origen_check
+      CHECK (origen IN ('venta','servicio_tecnico'));
+  EXCEPTION WHEN OTHERS THEN RAISE WARNING 'presupuestos_origen_check: %', SQLERRM; END;
+
+  -- Ampliar el estado heredado (creado/enviado/aprobado/rechazado/convertido)
+  -- con 'vencido', que hace falta porque la tabla ya maneja validez_dias.
+  BEGIN
+    ALTER TABLE asunhome.presupuestos DROP CONSTRAINT IF EXISTS presupuestos_estado_check;
+    ALTER TABLE asunhome.presupuestos ADD CONSTRAINT presupuestos_estado_check
+      CHECK (estado IN ('creado','enviado','aprobado','rechazado','convertido','vencido'));
+  EXCEPTION WHEN OTHERS THEN RAISE WARNING 'presupuestos_estado_check: %', SQLERRM; END;
+END;
+$p$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_presupuestos_empresa_numero_control
+  ON asunhome.presupuestos (empresa_id, lower(btrim(numero_control)));
+CREATE INDEX IF NOT EXISTS idx_presupuestos_cliente  ON asunhome.presupuestos (cliente_id);
+CREATE INDEX IF NOT EXISTS idx_presupuestos_estado   ON asunhome.presupuestos (estado);
+CREATE INDEX IF NOT EXISTS idx_presupuestos_fecha    ON asunhome.presupuestos (fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_presupuestos_orden_st ON asunhome.presupuestos (orden_servicio_id);
+
+
+-- 3.A.3 presupuesto_items (singular, tal como está en Ferrecolor)
+-- Heredada: producto_nombre, sku, cantidad, unidad_medida, precio_unitario,
+-- iva_tipo, subtotal, monto_iva, descuento, total.
+ALTER TABLE asunhome.presupuesto_items
+  ADD COLUMN IF NOT EXISTS orden         integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS observaciones text;
+
+CREATE INDEX IF NOT EXISTS idx_presupuesto_items_presupuesto
+  ON asunhome.presupuesto_items (presupuesto_id, orden);
+
+
+-- 3.A.4 cajas (REPORTE CAJA — se usa la tabla existente, no una nueva)
+-- Heredada: numero_caja, estado (abierta/en_cierre/cerrada), abierta_por,
+-- cerrada_por, fecha_apertura, fecha_cierre, monto_apertura,
+-- monto_cierre_contado, monto_esperado_efectivo, diferencia, arqueos jsonb.
+ALTER TABLE asunhome.cajas
+  ADD COLUMN IF NOT EXISTS ubicacion_id uuid;   -- caja de salón vs caja de depósito
+
+CREATE INDEX IF NOT EXISTS idx_cajas_estado ON asunhome.cajas (estado);
+CREATE INDEX IF NOT EXISTS idx_cajas_fecha  ON asunhome.cajas (fecha_apertura DESC);
+
+
+-- 3.A.5 caja_movimientos
+-- Heredada: caja_id, tipo (ingreso/egreso/retiro/ajuste), concepto (texto libre),
+-- monto, medio_pago (efectivo/tarjeta/transferencia/otro), usuario_id,
+-- usuario_email, observacion, venta_id, devolucion_id, anulado_*.
+-- Falta: vínculo a orden de servicio técnico y al cliente.
+ALTER TABLE asunhome.caja_movimientos
+  ADD COLUMN IF NOT EXISTS orden_servicio_id uuid,
+  ADD COLUMN IF NOT EXISTS cliente_id        uuid;
+
+CREATE INDEX IF NOT EXISTS idx_caja_mov_caja      ON asunhome.caja_movimientos (caja_id);
+CREATE INDEX IF NOT EXISTS idx_caja_mov_fecha     ON asunhome.caja_movimientos (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_caja_mov_tipo      ON asunhome.caja_movimientos (tipo);
+CREATE INDEX IF NOT EXISTS idx_caja_mov_venta     ON asunhome.caja_movimientos (venta_id);
+CREATE INDEX IF NOT EXISTS idx_caja_mov_orden_st  ON asunhome.caja_movimientos (orden_servicio_id);
+
+
+-- 3.A.6 movimientos_inventario: transferencias salón ↔ depósito y series
+-- Heredada: venta_id, produccion_id, devolucion_id, created_by, usuario_nombre,
+-- referencia, fecha, anulado_at/por.
+ALTER TABLE asunhome.movimientos_inventario
+  ADD COLUMN IF NOT EXISTS ubicacion_origen_id  uuid,
+  ADD COLUMN IF NOT EXISTS ubicacion_destino_id uuid,
+  ADD COLUMN IF NOT EXISTS serie_id             uuid,
+  ADD COLUMN IF NOT EXISTS ajuste_id            uuid,
+  ADD COLUMN IF NOT EXISTS orden_servicio_id    uuid,
+  ADD COLUMN IF NOT EXISTS observaciones        text;
+
+CREATE INDEX IF NOT EXISTS idx_mov_inv_ubic_origen  ON asunhome.movimientos_inventario (ubicacion_origen_id);
+CREATE INDEX IF NOT EXISTS idx_mov_inv_ubic_destino ON asunhome.movimientos_inventario (ubicacion_destino_id);
+CREATE INDEX IF NOT EXISTS idx_mov_inv_serie        ON asunhome.movimientos_inventario (serie_id);
+
+-- Los CHECK se AMPLÍAN preservando todos los valores que Ferrecolor ya usa
+-- ('produccion' y 'devolucion_venta' incluidos): solo se agregan los nuevos.
+DO $mov$
+BEGIN
+  BEGIN
+    ALTER TABLE asunhome.movimientos_inventario DROP CONSTRAINT IF EXISTS movimientos_inventario_tipo_check;
+    ALTER TABLE asunhome.movimientos_inventario ADD CONSTRAINT movimientos_inventario_tipo_check
+      CHECK (tipo IN ('ENTRADA','SALIDA','AJUSTE','TRANSFERENCIA'));
+  EXCEPTION WHEN OTHERS THEN RAISE WARNING 'movimientos_inventario tipo_check: %', SQLERRM; END;
+
+  BEGIN
+    ALTER TABLE asunhome.movimientos_inventario DROP CONSTRAINT IF EXISTS movimientos_inventario_origen_check;
+    ALTER TABLE asunhome.movimientos_inventario ADD CONSTRAINT movimientos_inventario_origen_check
+      CHECK (origen IN (
+        -- heredados de Ferrecolor (no tocar)
+        'compra','venta','ajuste_manual','inventario_inicial','produccion','devolucion_venta',
+        -- nuevos de ASUNHOME
+        'transferencia','servicio_tecnico','averia','devolucion_proveedor'
+      ));
+  EXCEPTION WHEN OTHERS THEN RAISE WARNING 'movimientos_inventario origen_check: %', SQLERRM; END;
+END;
+$mov$;
+
+
+-- 3.A.7 Búsqueda parcial de clientes por nombre / RUC ("estira por cliente")
+CREATE INDEX IF NOT EXISTS idx_clientes_nombre_trgm
+  ON asunhome.clientes USING gin (nombre gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_clientes_ruc_trgm
+  ON asunhome.clientes USING gin (ruc gin_trgm_ops);
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 3.B TABLAS NUEVAS (no existen en Ferrecolor)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- 3.B.1 marcas · REPORTE MARCA
 CREATE TABLE IF NOT EXISTS asunhome.marcas (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id   uuid NOT NULL,
@@ -532,37 +687,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_marcas_empresa_nombre
 CREATE INDEX IF NOT EXISTS idx_marcas_empresa ON asunhome.marcas (empresa_id);
 CREATE INDEX IF NOT EXISTS idx_marcas_activo  ON asunhome.marcas (activo);
 
+
+-- 3.B.2 lineas_producto · REPORTE LINEA DE PRODUCTOS
+-- Distinta de `categorias_productos`, que Ferrecolor ya usa para categorías.
 CREATE TABLE IF NOT EXISTS asunhome.lineas_producto (
-  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  empresa_id   uuid NOT NULL,
-  nombre       text NOT NULL,
-  codigo       text,
-  descripcion  text,
-  parent_id    uuid REFERENCES asunhome.lineas_producto(id) ON DELETE SET NULL,
-  activo       boolean NOT NULL DEFAULT true,
-  created_at   timestamptz NOT NULL DEFAULT now(),
-  updated_at   timestamptz NOT NULL DEFAULT now()
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id  uuid NOT NULL,
+  nombre      text NOT NULL,
+  codigo      text,
+  descripcion text,
+  parent_id   uuid REFERENCES asunhome.lineas_producto(id) ON DELETE SET NULL,
+  activo      boolean NOT NULL DEFAULT true,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_lineas_producto_empresa_nombre
   ON asunhome.lineas_producto (empresa_id, lower(btrim(nombre)));
 CREATE INDEX IF NOT EXISTS idx_lineas_producto_empresa ON asunhome.lineas_producto (empresa_id);
 CREATE INDEX IF NOT EXISTS idx_lineas_producto_parent  ON asunhome.lineas_producto (parent_id);
 
--- Enganche en productos
-ALTER TABLE asunhome.productos
-  ADD COLUMN IF NOT EXISTS marca_id      uuid,
-  ADD COLUMN IF NOT EXISTS linea_id      uuid,
-  ADD COLUMN IF NOT EXISTS maneja_series boolean NOT NULL DEFAULT false,
-  ADD COLUMN IF NOT EXISTS garantia_meses integer;
 
-CREATE INDEX IF NOT EXISTS idx_productos_marca ON asunhome.productos (marca_id);
-CREATE INDEX IF NOT EXISTS idx_productos_linea ON asunhome.productos (linea_id);
-
-
--- ── 3.2 Números de serie ────────────────────────────────────────────────────
--- VENTA PRODUCTO SERIAL · carga de obs/nº de serie ·
--- trazabilidad "¿de qué proveedor vino este televisor?"
-
+-- 3.B.3 producto_series · VENTA PRODUCTO SERIAL · carga de obs/nº de serie
+-- Una fila por unidad física. Es lo que permite responder
+-- "este televisor averiado, ¿de qué proveedor vino?".
 CREATE TABLE IF NOT EXISTS asunhome.producto_series (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id     uuid NOT NULL,
@@ -590,44 +737,43 @@ CREATE TABLE IF NOT EXISTS asunhome.producto_series (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_producto_series_empresa_serie
   ON asunhome.producto_series (empresa_id, lower(btrim(numero_serie)));
-CREATE INDEX IF NOT EXISTS idx_series_producto   ON asunhome.producto_series (producto_id);
-CREATE INDEX IF NOT EXISTS idx_series_estado     ON asunhome.producto_series (estado);
-CREATE INDEX IF NOT EXISTS idx_series_proveedor  ON asunhome.producto_series (proveedor_id);
-CREATE INDEX IF NOT EXISTS idx_series_venta      ON asunhome.producto_series (venta_id);
-CREATE INDEX IF NOT EXISTS idx_series_cliente    ON asunhome.producto_series (cliente_id);
-CREATE INDEX IF NOT EXISTS idx_series_ubicacion  ON asunhome.producto_series (ubicacion_id);
+CREATE INDEX IF NOT EXISTS idx_series_producto  ON asunhome.producto_series (producto_id);
+CREATE INDEX IF NOT EXISTS idx_series_estado    ON asunhome.producto_series (estado);
+CREATE INDEX IF NOT EXISTS idx_series_proveedor ON asunhome.producto_series (proveedor_id);
+CREATE INDEX IF NOT EXISTS idx_series_venta     ON asunhome.producto_series (venta_id);
+CREATE INDEX IF NOT EXISTS idx_series_cliente   ON asunhome.producto_series (cliente_id);
+CREATE INDEX IF NOT EXISTS idx_series_ubicacion ON asunhome.producto_series (ubicacion_id);
 CREATE INDEX IF NOT EXISTS idx_series_serie_trgm
   ON asunhome.producto_series USING gin (numero_serie gin_trgm_ops);
 
 
--- ── 3.3 Productos averiados ─────────────────────────────────────────────────
-
+-- 3.B.4 productos_averiados
 CREATE TABLE IF NOT EXISTS asunhome.productos_averiados (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  empresa_id      uuid NOT NULL,
-  producto_id     uuid NOT NULL,
-  serie_id        uuid,
-  numero_serie    text,
-  proveedor_id    uuid,                      -- ← de qué proveedor se adquirió
-  compra_id       uuid,
-  ubicacion_id    uuid,
-  cantidad        numeric NOT NULL DEFAULT 1,
-  motivo          text NOT NULL DEFAULT 'fabrica'
-                  CHECK (motivo IN ('fabrica','transporte','deposito','cliente',
-                                    'exhibicion','desconocido','otro')),
-  descripcion     text,
-  estado          text NOT NULL DEFAULT 'detectado'
-                  CHECK (estado IN ('detectado','en_revision','en_garantia_proveedor',
-                                    'reparado','descartado','devuelto_proveedor')),
-  costo_estimado  numeric,
-  recuperado      boolean NOT NULL DEFAULT false,
-  fecha_deteccion timestamptz NOT NULL DEFAULT now(),
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id       uuid NOT NULL,
+  producto_id      uuid NOT NULL,
+  serie_id         uuid,
+  numero_serie     text,
+  proveedor_id     uuid,                     -- ← de qué proveedor se adquirió
+  compra_id        uuid,
+  ubicacion_id     uuid,
+  cantidad         numeric NOT NULL DEFAULT 1,
+  motivo           text NOT NULL DEFAULT 'fabrica'
+                   CHECK (motivo IN ('fabrica','transporte','deposito','cliente',
+                                     'exhibicion','desconocido','otro')),
+  descripcion      text,
+  estado           text NOT NULL DEFAULT 'detectado'
+                   CHECK (estado IN ('detectado','en_revision','en_garantia_proveedor',
+                                     'reparado','descartado','devuelto_proveedor')),
+  costo_estimado   numeric,
+  recuperado       boolean NOT NULL DEFAULT false,
+  fecha_deteccion  timestamptz NOT NULL DEFAULT now(),
   fecha_resolucion timestamptz,
-  reportado_por   uuid,
-  resuelto_por    uuid,
-  observaciones   text,
-  created_at      timestamptz NOT NULL DEFAULT now(),
-  updated_at      timestamptz NOT NULL DEFAULT now()
+  reportado_por    uuid,
+  resuelto_por     uuid,
+  observaciones    text,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_averiados_empresa   ON asunhome.productos_averiados (empresa_id);
 CREATE INDEX IF NOT EXISTS idx_averiados_producto  ON asunhome.productos_averiados (producto_id);
@@ -636,14 +782,13 @@ CREATE INDEX IF NOT EXISTS idx_averiados_estado    ON asunhome.productos_averiad
 CREATE INDEX IF NOT EXISTS idx_averiados_serie     ON asunhome.productos_averiados (serie_id);
 
 
--- ── 3.4 Servicio técnico ────────────────────────────────────────────────────
-
+-- 3.B.5 Servicio técnico
 CREATE TABLE IF NOT EXISTS asunhome.servicio_tecnico_ordenes (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id         uuid NOT NULL,
   numero             text NOT NULL,
   cliente_id         uuid,
-  cliente_nombre     text,                   -- snapshot para búsqueda
+  cliente_nombre     text,                   -- snapshot, para "estirar" por nombre
   cliente_ruc        text,
   cliente_telefono   text,
   cliente_direccion  text,
@@ -683,12 +828,11 @@ CREATE TABLE IF NOT EXISTS asunhome.servicio_tecnico_ordenes (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_st_ordenes_empresa_numero
   ON asunhome.servicio_tecnico_ordenes (empresa_id, lower(btrim(numero)));
-CREATE INDEX IF NOT EXISTS idx_st_ordenes_cliente  ON asunhome.servicio_tecnico_ordenes (cliente_id);
-CREATE INDEX IF NOT EXISTS idx_st_ordenes_estado   ON asunhome.servicio_tecnico_ordenes (estado);
-CREATE INDEX IF NOT EXISTS idx_st_ordenes_tecnico  ON asunhome.servicio_tecnico_ordenes (tecnico_id);
-CREATE INDEX IF NOT EXISTS idx_st_ordenes_serie    ON asunhome.servicio_tecnico_ordenes (serie_id);
-CREATE INDEX IF NOT EXISTS idx_st_ordenes_fecha    ON asunhome.servicio_tecnico_ordenes (fecha_ingreso DESC);
--- "estira por cliente": búsqueda parcial por nombre o RUC
+CREATE INDEX IF NOT EXISTS idx_st_ordenes_cliente ON asunhome.servicio_tecnico_ordenes (cliente_id);
+CREATE INDEX IF NOT EXISTS idx_st_ordenes_estado  ON asunhome.servicio_tecnico_ordenes (estado);
+CREATE INDEX IF NOT EXISTS idx_st_ordenes_tecnico ON asunhome.servicio_tecnico_ordenes (tecnico_id);
+CREATE INDEX IF NOT EXISTS idx_st_ordenes_serie   ON asunhome.servicio_tecnico_ordenes (serie_id);
+CREATE INDEX IF NOT EXISTS idx_st_ordenes_fecha   ON asunhome.servicio_tecnico_ordenes (fecha_ingreso DESC);
 CREATE INDEX IF NOT EXISTS idx_st_ordenes_cliente_nombre_trgm
   ON asunhome.servicio_tecnico_ordenes USING gin (cliente_nombre gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_st_ordenes_cliente_ruc_trgm
@@ -723,85 +867,21 @@ CREATE TABLE IF NOT EXISTS asunhome.servicio_tecnico_historial (
   usuario_nombre  text,
   created_at      timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_st_historial_orden ON asunhome.servicio_tecnico_historial (orden_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_st_historial_orden
+  ON asunhome.servicio_tecnico_historial (orden_id, created_at DESC);
 
 
--- ── 3.5 Hoja de presupuesto ─────────────────────────────────────────────────
-
-CREATE TABLE IF NOT EXISTS asunhome.presupuestos (
-  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  empresa_id        uuid NOT NULL,
-  numero            text NOT NULL,
-  cliente_id        uuid,
-  cliente_nombre    text,
-  cliente_ruc       text,
-  cliente_telefono  text,
-  cliente_direccion text,
-  origen            text NOT NULL DEFAULT 'venta'
-                    CHECK (origen IN ('venta','servicio_tecnico')),
-  orden_servicio_id uuid REFERENCES asunhome.servicio_tecnico_ordenes(id) ON DELETE SET NULL,
-  moneda            text NOT NULL DEFAULT 'PYG' CHECK (moneda IN ('PYG','GS','USD')),
-  tipo_cambio       numeric NOT NULL DEFAULT 1,
-  subtotal          numeric NOT NULL DEFAULT 0,
-  descuento         numeric NOT NULL DEFAULT 0,
-  monto_iva         numeric NOT NULL DEFAULT 0,
-  total             numeric NOT NULL DEFAULT 0,
-  estado            text NOT NULL DEFAULT 'borrador'
-                    CHECK (estado IN ('borrador','enviado','aprobado','rechazado',
-                                      'vencido','convertido')),
-  validez_dias      integer NOT NULL DEFAULT 15,
-  fecha             timestamptz NOT NULL DEFAULT now(),
-  fecha_vencimiento date,
-  venta_id          uuid,                    -- si se convirtió en venta
-  vendedor_id       uuid,
-  vendedor_nombre   text,
-  condiciones       text,
-  observaciones     text,
-  created_at        timestamptz NOT NULL DEFAULT now(),
-  updated_at        timestamptz NOT NULL DEFAULT now(),
-  created_by        uuid,
-  updated_by        uuid
-);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_presupuestos_empresa_numero
-  ON asunhome.presupuestos (empresa_id, lower(btrim(numero)));
-CREATE INDEX IF NOT EXISTS idx_presupuestos_cliente ON asunhome.presupuestos (cliente_id);
-CREATE INDEX IF NOT EXISTS idx_presupuestos_estado  ON asunhome.presupuestos (estado);
-CREATE INDEX IF NOT EXISTS idx_presupuestos_fecha   ON asunhome.presupuestos (fecha DESC);
-
-CREATE TABLE IF NOT EXISTS asunhome.presupuestos_items (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  empresa_id      uuid NOT NULL,
-  presupuesto_id  uuid NOT NULL REFERENCES asunhome.presupuestos(id) ON DELETE CASCADE,
-  producto_id     uuid,
-  producto_nombre text NOT NULL,
-  sku             text,
-  cantidad        numeric NOT NULL DEFAULT 1,
-  precio_unitario numeric NOT NULL DEFAULT 0,
-  descuento       numeric NOT NULL DEFAULT 0,
-  tipo_iva        text NOT NULL DEFAULT '10%' CHECK (tipo_iva IN ('EXENTA','5%','10%')),
-  subtotal        numeric NOT NULL DEFAULT 0,
-  monto_iva       numeric NOT NULL DEFAULT 0,
-  total_linea     numeric NOT NULL DEFAULT 0,
-  orden           integer NOT NULL DEFAULT 0,
-  observaciones   text,
-  created_at      timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_presupuestos_items_presupuesto
-  ON asunhome.presupuestos_items (presupuesto_id, orden);
-
-
--- ── 3.6 Ajustes de stock + usuario único autorizado ─────────────────────────
-
+-- 3.B.6 Ajustes de stock + usuario único autorizado
 CREATE TABLE IF NOT EXISTS asunhome.ajuste_stock_autorizados (
-  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  empresa_id   uuid NOT NULL,
-  usuario_id   uuid NOT NULL,
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id    uuid NOT NULL,
+  usuario_id    uuid NOT NULL,
   usuario_email text,
-  activo       boolean NOT NULL DEFAULT true,
-  asignado_por uuid,
-  motivo       text,
-  created_at   timestamptz NOT NULL DEFAULT now(),
-  updated_at   timestamptz NOT NULL DEFAULT now()
+  activo        boolean NOT NULL DEFAULT true,
+  asignado_por  uuid,
+  motivo        text,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
 );
 -- "Usuario único ajuste": a lo sumo UN autorizado activo por empresa.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ajuste_autorizado_unico_por_empresa
@@ -811,25 +891,25 @@ CREATE INDEX IF NOT EXISTS idx_ajuste_autorizados_usuario
   ON asunhome.ajuste_stock_autorizados (usuario_id);
 
 CREATE TABLE IF NOT EXISTS asunhome.ajustes_stock (
-  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  empresa_id          uuid NOT NULL,
-  numero              text NOT NULL,
-  tipo                text NOT NULL DEFAULT 'correccion'
-                      CHECK (tipo IN ('conteo','merma','correccion','transferencia')),
-  ubicacion_id        uuid,
-  ubicacion_destino_id uuid,                 -- solo para transferencia salón ↔ depósito
-  motivo              text NOT NULL,
-  estado              text NOT NULL DEFAULT 'borrador'
-                      CHECK (estado IN ('borrador','aplicado','anulado')),
-  fecha               timestamptz NOT NULL DEFAULT now(),
-  solicitado_por      uuid,
-  aplicado_por        uuid,
-  aplicado_at         timestamptz,
-  anulado_por         uuid,
-  anulado_at          timestamptz,
-  observaciones       text,
-  created_at          timestamptz NOT NULL DEFAULT now(),
-  updated_at          timestamptz NOT NULL DEFAULT now()
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id           uuid NOT NULL,
+  numero               text NOT NULL,
+  tipo                 text NOT NULL DEFAULT 'correccion'
+                       CHECK (tipo IN ('conteo','merma','correccion','transferencia')),
+  ubicacion_id         uuid,
+  ubicacion_destino_id uuid,                 -- solo transferencia salón ↔ depósito
+  motivo               text NOT NULL,
+  estado               text NOT NULL DEFAULT 'borrador'
+                       CHECK (estado IN ('borrador','aplicado','anulado')),
+  fecha                timestamptz NOT NULL DEFAULT now(),
+  solicitado_por       uuid,
+  aplicado_por         uuid,
+  aplicado_at          timestamptz,
+  anulado_por          uuid,
+  anulado_at           timestamptz,
+  observaciones        text,
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  updated_at           timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ajustes_stock_empresa_numero
   ON asunhome.ajustes_stock (empresa_id, lower(btrim(numero)));
@@ -854,132 +934,9 @@ CREATE INDEX IF NOT EXISTS idx_ajustes_items_ajuste   ON asunhome.ajustes_stock_
 CREATE INDEX IF NOT EXISTS idx_ajustes_items_producto ON asunhome.ajustes_stock_items (producto_id);
 
 
--- ── 3.7 Caja ────────────────────────────────────────────────────────────────
--- REPORTE CAJA (y su export a Excel se arma sobre estas dos tablas)
-
-CREATE TABLE IF NOT EXISTS asunhome.caja_sesiones (
-  id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  empresa_id             uuid NOT NULL,
-  numero                 text,
-  usuario_id             uuid NOT NULL,
-  usuario_nombre         text,
-  ubicacion_id           uuid,
-  estado                 text NOT NULL DEFAULT 'abierta'
-                         CHECK (estado IN ('abierta','cerrada')),
-  monto_apertura         numeric NOT NULL DEFAULT 0,
-  monto_cierre_declarado numeric,
-  monto_cierre_sistema   numeric,
-  diferencia             numeric,
-  moneda                 text NOT NULL DEFAULT 'PYG' CHECK (moneda IN ('PYG','GS','USD')),
-  abierta_at             timestamptz NOT NULL DEFAULT now(),
-  cerrada_at             timestamptz,
-  cerrada_por            uuid,
-  observaciones          text,
-  created_at             timestamptz NOT NULL DEFAULT now(),
-  updated_at             timestamptz NOT NULL DEFAULT now()
-);
--- Una sola caja abierta por usuario
-CREATE UNIQUE INDEX IF NOT EXISTS uq_caja_abierta_por_usuario
-  ON asunhome.caja_sesiones (empresa_id, usuario_id)
-  WHERE estado = 'abierta';
-CREATE INDEX IF NOT EXISTS idx_caja_sesiones_estado ON asunhome.caja_sesiones (estado);
-CREATE INDEX IF NOT EXISTS idx_caja_sesiones_fecha  ON asunhome.caja_sesiones (abierta_at DESC);
-
-CREATE TABLE IF NOT EXISTS asunhome.caja_movimientos (
-  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  empresa_id        uuid NOT NULL,
-  sesion_id         uuid NOT NULL REFERENCES asunhome.caja_sesiones(id) ON DELETE CASCADE,
-  tipo              text NOT NULL CHECK (tipo IN ('ingreso','egreso')),
-  concepto          text NOT NULL DEFAULT 'venta'
-                    CHECK (concepto IN ('apertura','venta','cobro_credito','servicio_tecnico',
-                                        'gasto','compra','retiro','deposito_bancario',
-                                        'devolucion','ajuste','otro')),
-  metodo_pago       text NOT NULL DEFAULT 'efectivo'
-                    CHECK (metodo_pago IN ('efectivo','tarjeta_credito','tarjeta_debito',
-                                           'transferencia','cheque','qr','credito','otro')),
-  monto             numeric NOT NULL,
-  moneda            text NOT NULL DEFAULT 'PYG' CHECK (moneda IN ('PYG','GS','USD')),
-  tipo_cambio       numeric NOT NULL DEFAULT 1,
-  venta_id          uuid,
-  factura_id        uuid,
-  compra_id         uuid,
-  gasto_id          uuid,
-  orden_servicio_id uuid REFERENCES asunhome.servicio_tecnico_ordenes(id) ON DELETE SET NULL,
-  cliente_id        uuid,
-  referencia        text,
-  descripcion       text,
-  usuario_id        uuid,
-  fecha             timestamptz NOT NULL DEFAULT now(),
-  created_at        timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_caja_mov_sesion  ON asunhome.caja_movimientos (sesion_id);
-CREATE INDEX IF NOT EXISTS idx_caja_mov_fecha   ON asunhome.caja_movimientos (fecha DESC);
-CREATE INDEX IF NOT EXISTS idx_caja_mov_tipo    ON asunhome.caja_movimientos (tipo, concepto);
-CREATE INDEX IF NOT EXISTS idx_caja_mov_venta   ON asunhome.caja_movimientos (venta_id);
-
-
--- ── 3.8 Movimiento de productos: transferencias salón ↔ depósito ────────────
-
-ALTER TABLE asunhome.movimientos_inventario
-  ADD COLUMN IF NOT EXISTS ubicacion_origen_id   uuid,
-  ADD COLUMN IF NOT EXISTS ubicacion_destino_id  uuid,
-  ADD COLUMN IF NOT EXISTS serie_id              uuid,
-  ADD COLUMN IF NOT EXISTS ajuste_id             uuid,
-  ADD COLUMN IF NOT EXISTS orden_servicio_id     uuid,
-  ADD COLUMN IF NOT EXISTS usuario_id            uuid,
-  ADD COLUMN IF NOT EXISTS usuario_nombre        text,
-  ADD COLUMN IF NOT EXISTS observaciones         text;
-
-CREATE INDEX IF NOT EXISTS idx_mov_inv_ubic_origen  ON asunhome.movimientos_inventario (ubicacion_origen_id);
-CREATE INDEX IF NOT EXISTS idx_mov_inv_ubic_destino ON asunhome.movimientos_inventario (ubicacion_destino_id);
-CREATE INDEX IF NOT EXISTS idx_mov_inv_serie        ON asunhome.movimientos_inventario (serie_id);
-
--- Ampliar los CHECK heredados para admitir transferencias y los nuevos orígenes
-DO $mov$
-BEGIN
-  BEGIN
-    ALTER TABLE asunhome.movimientos_inventario DROP CONSTRAINT IF EXISTS movimientos_inventario_tipo_check;
-    ALTER TABLE asunhome.movimientos_inventario ADD CONSTRAINT movimientos_inventario_tipo_check
-      CHECK (tipo IN ('ENTRADA','SALIDA','AJUSTE','TRANSFERENCIA'));
-  EXCEPTION WHEN OTHERS THEN
-    RAISE WARNING 'movimientos_inventario tipo_check: %', SQLERRM;
-  END;
-
-  BEGIN
-    ALTER TABLE asunhome.movimientos_inventario DROP CONSTRAINT IF EXISTS movimientos_inventario_origen_check;
-    ALTER TABLE asunhome.movimientos_inventario ADD CONSTRAINT movimientos_inventario_origen_check
-      CHECK (origen IN ('compra','venta','ajuste_manual','inventario_inicial',
-                        'transferencia','servicio_tecnico','averia',
-                        'devolucion_cliente','devolucion_proveedor','presupuesto'));
-  EXCEPTION WHEN OTHERS THEN
-    RAISE WARNING 'movimientos_inventario origen_check: %', SQLERRM;
-  END;
-END;
-$mov$;
-
--- Búsqueda parcial de clientes por nombre / RUC ("estira por cliente")
-DO $cli$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'asunhome' AND table_name = 'clientes' AND column_name = 'nombre'
-  ) THEN
-    CREATE INDEX IF NOT EXISTS idx_clientes_nombre_trgm
-      ON asunhome.clientes USING gin (nombre gin_trgm_ops);
-  END IF;
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'asunhome' AND table_name = 'clientes' AND column_name = 'ruc'
-  ) THEN
-    CREATE INDEX IF NOT EXISTS idx_clientes_ruc_trgm
-      ON asunhome.clientes USING gin (ruc gin_trgm_ops);
-  END IF;
-END;
-$cli$;
-
-
--- ── 3.9 FKs de las tablas nuevas hacia las heredadas ────────────────────────
--- Se agregan solo si la tabla referenciada existe en `asunhome`.
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 3.9 FOREIGN KEYS — se crean solo si la tabla referenciada existe
+-- ─────────────────────────────────────────────────────────────────────────────
 
 DO $fks$
 DECLARE
@@ -988,65 +945,57 @@ DECLARE
 BEGIN
   FOR f IN
     SELECT * FROM (VALUES
-      ('marcas',                    'empresa_id',           'empresas',                  'CASCADE'),
-      ('marcas',                    'proveedor_id',         'proveedores',               'SET NULL'),
-      ('lineas_producto',           'empresa_id',           'empresas',                  'CASCADE'),
-      ('productos',                 'marca_id',             'marcas',                    'SET NULL'),
-      ('productos',                 'linea_id',             'lineas_producto',           'SET NULL'),
-      ('producto_series',           'empresa_id',           'empresas',                  'CASCADE'),
-      ('producto_series',           'producto_id',          'productos',                 'RESTRICT'),
-      ('producto_series',           'ubicacion_id',         'inventario_ubicaciones',    'SET NULL'),
-      ('producto_series',           'proveedor_id',         'proveedores',               'SET NULL'),
-      ('producto_series',           'compra_id',            'compras',                   'SET NULL'),
-      ('producto_series',           'venta_id',             'ventas',                    'SET NULL'),
-      ('producto_series',           'venta_item_id',        'ventas_items',              'SET NULL'),
-      ('producto_series',           'cliente_id',           'clientes',                  'SET NULL'),
-      ('productos_averiados',       'empresa_id',           'empresas',                  'CASCADE'),
-      ('productos_averiados',       'producto_id',          'productos',                 'RESTRICT'),
-      ('productos_averiados',       'serie_id',             'producto_series',           'SET NULL'),
-      ('productos_averiados',       'proveedor_id',         'proveedores',               'SET NULL'),
-      ('productos_averiados',       'compra_id',            'compras',                   'SET NULL'),
-      ('productos_averiados',       'ubicacion_id',         'inventario_ubicaciones',    'SET NULL'),
-      ('servicio_tecnico_ordenes',  'empresa_id',           'empresas',                  'CASCADE'),
-      ('servicio_tecnico_ordenes',  'cliente_id',           'clientes',                  'SET NULL'),
-      ('servicio_tecnico_ordenes',  'producto_id',          'productos',                 'SET NULL'),
-      ('servicio_tecnico_ordenes',  'serie_id',             'producto_series',           'SET NULL'),
-      ('servicio_tecnico_ordenes',  'marca_id',             'marcas',                    'SET NULL'),
-      ('servicio_tecnico_ordenes',  'proveedor_id',         'proveedores',               'SET NULL'),
-      ('servicio_tecnico_ordenes',  'presupuesto_id',       'presupuestos',              'SET NULL'),
-      ('servicio_tecnico_items',    'empresa_id',           'empresas',                  'CASCADE'),
-      ('servicio_tecnico_items',    'producto_id',          'productos',                 'SET NULL'),
-      ('servicio_tecnico_items',    'movimiento_id',        'movimientos_inventario',    'SET NULL'),
-      ('servicio_tecnico_historial','empresa_id',           'empresas',                  'CASCADE'),
-      ('presupuestos',              'empresa_id',           'empresas',                  'CASCADE'),
-      ('presupuestos',              'cliente_id',           'clientes',                  'SET NULL'),
-      ('presupuestos',              'venta_id',             'ventas',                    'SET NULL'),
-      ('presupuestos_items',        'empresa_id',           'empresas',                  'CASCADE'),
-      ('presupuestos_items',        'producto_id',          'productos',                 'SET NULL'),
-      ('ajuste_stock_autorizados',  'empresa_id',           'empresas',                  'CASCADE'),
-      ('ajustes_stock',             'empresa_id',           'empresas',                  'CASCADE'),
-      ('ajustes_stock',             'ubicacion_id',         'inventario_ubicaciones',    'SET NULL'),
-      ('ajustes_stock',             'ubicacion_destino_id', 'inventario_ubicaciones',    'SET NULL'),
-      ('ajustes_stock_items',       'empresa_id',           'empresas',                  'CASCADE'),
-      ('ajustes_stock_items',       'producto_id',          'productos',                 'RESTRICT'),
-      ('ajustes_stock_items',       'serie_id',             'producto_series',           'SET NULL'),
-      ('ajustes_stock_items',       'movimiento_id',        'movimientos_inventario',    'SET NULL'),
-      ('caja_sesiones',             'empresa_id',           'empresas',                  'CASCADE'),
-      ('caja_sesiones',             'ubicacion_id',         'inventario_ubicaciones',    'SET NULL'),
-      ('caja_movimientos',          'empresa_id',           'empresas',                  'CASCADE'),
-      ('caja_movimientos',          'venta_id',             'ventas',                    'SET NULL'),
-      ('caja_movimientos',          'factura_id',           'facturas',                  'SET NULL'),
-      ('caja_movimientos',          'compra_id',            'compras',                   'SET NULL'),
-      ('caja_movimientos',          'gasto_id',             'gastos',                    'SET NULL'),
-      ('caja_movimientos',          'cliente_id',           'clientes',                  'SET NULL'),
-      ('movimientos_inventario',    'ubicacion_origen_id',  'inventario_ubicaciones',    'SET NULL'),
-      ('movimientos_inventario',    'ubicacion_destino_id', 'inventario_ubicaciones',    'SET NULL'),
-      ('movimientos_inventario',    'serie_id',             'producto_series',           'SET NULL'),
-      ('movimientos_inventario',    'ajuste_id',            'ajustes_stock',             'SET NULL'),
-      ('movimientos_inventario',    'orden_servicio_id',    'servicio_tecnico_ordenes',  'SET NULL')
+      -- tablas nuevas
+      ('marcas',                    'empresa_id',           'empresas',                 'CASCADE'),
+      ('marcas',                    'proveedor_id',         'proveedores',              'SET NULL'),
+      ('lineas_producto',           'empresa_id',           'empresas',                 'CASCADE'),
+      ('producto_series',           'empresa_id',           'empresas',                 'CASCADE'),
+      ('producto_series',           'producto_id',          'productos',                'RESTRICT'),
+      ('producto_series',           'ubicacion_id',         'inventario_ubicaciones',   'SET NULL'),
+      ('producto_series',           'proveedor_id',         'proveedores',              'SET NULL'),
+      ('producto_series',           'compra_id',            'compras',                  'SET NULL'),
+      ('producto_series',           'venta_id',             'ventas',                   'SET NULL'),
+      ('producto_series',           'venta_item_id',        'ventas_items',             'SET NULL'),
+      ('producto_series',           'cliente_id',           'clientes',                 'SET NULL'),
+      ('productos_averiados',       'empresa_id',           'empresas',                 'CASCADE'),
+      ('productos_averiados',       'producto_id',          'productos',                'RESTRICT'),
+      ('productos_averiados',       'serie_id',             'producto_series',          'SET NULL'),
+      ('productos_averiados',       'proveedor_id',         'proveedores',              'SET NULL'),
+      ('productos_averiados',       'compra_id',            'compras',                  'SET NULL'),
+      ('productos_averiados',       'ubicacion_id',         'inventario_ubicaciones',   'SET NULL'),
+      ('servicio_tecnico_ordenes',  'empresa_id',           'empresas',                 'CASCADE'),
+      ('servicio_tecnico_ordenes',  'cliente_id',           'clientes',                 'SET NULL'),
+      ('servicio_tecnico_ordenes',  'producto_id',          'productos',                'SET NULL'),
+      ('servicio_tecnico_ordenes',  'serie_id',             'producto_series',          'SET NULL'),
+      ('servicio_tecnico_ordenes',  'marca_id',             'marcas',                   'SET NULL'),
+      ('servicio_tecnico_ordenes',  'proveedor_id',         'proveedores',              'SET NULL'),
+      ('servicio_tecnico_ordenes',  'presupuesto_id',       'presupuestos',             'SET NULL'),
+      ('servicio_tecnico_items',    'empresa_id',           'empresas',                 'CASCADE'),
+      ('servicio_tecnico_items',    'producto_id',          'productos',                'SET NULL'),
+      ('servicio_tecnico_items',    'movimiento_id',        'movimientos_inventario',   'SET NULL'),
+      ('servicio_tecnico_historial','empresa_id',           'empresas',                 'CASCADE'),
+      ('ajuste_stock_autorizados',  'empresa_id',           'empresas',                 'CASCADE'),
+      ('ajustes_stock',             'empresa_id',           'empresas',                 'CASCADE'),
+      ('ajustes_stock',             'ubicacion_id',         'inventario_ubicaciones',   'SET NULL'),
+      ('ajustes_stock',             'ubicacion_destino_id', 'inventario_ubicaciones',   'SET NULL'),
+      ('ajustes_stock_items',       'empresa_id',           'empresas',                 'CASCADE'),
+      ('ajustes_stock_items',       'producto_id',          'productos',                'RESTRICT'),
+      ('ajustes_stock_items',       'serie_id',             'producto_series',          'SET NULL'),
+      ('ajustes_stock_items',       'movimiento_id',        'movimientos_inventario',   'SET NULL'),
+      -- columnas nuevas sobre tablas heredadas
+      ('productos',                 'marca_id',             'marcas',                   'SET NULL'),
+      ('productos',                 'linea_id',             'lineas_producto',          'SET NULL'),
+      ('presupuestos',              'orden_servicio_id',    'servicio_tecnico_ordenes', 'SET NULL'),
+      ('cajas',                     'ubicacion_id',         'inventario_ubicaciones',   'SET NULL'),
+      ('caja_movimientos',          'orden_servicio_id',    'servicio_tecnico_ordenes', 'SET NULL'),
+      ('caja_movimientos',          'cliente_id',           'clientes',                 'SET NULL'),
+      ('movimientos_inventario',    'ubicacion_origen_id',  'inventario_ubicaciones',   'SET NULL'),
+      ('movimientos_inventario',    'ubicacion_destino_id', 'inventario_ubicaciones',   'SET NULL'),
+      ('movimientos_inventario',    'serie_id',             'producto_series',          'SET NULL'),
+      ('movimientos_inventario',    'ajuste_id',            'ajustes_stock',            'SET NULL'),
+      ('movimientos_inventario',    'orden_servicio_id',    'servicio_tecnico_ordenes', 'SET NULL')
     ) AS t(tabla, col, ref_tabla, on_delete)
   LOOP
-    -- la tabla origen, la columna y la tabla referenciada deben existir
     CONTINUE WHEN NOT EXISTS (
       SELECT 1 FROM information_schema.columns
       WHERE table_schema = v_sch AND table_name = f.tabla AND column_name = f.col
@@ -1074,86 +1023,69 @@ $fks$;
 -- =============================================================================
 -- PARTE 4 — VISTAS DE REPORTES
 --
--- Cada vista va en su propio bloque: si el schema heredado no tuviera alguna
--- columna esperada, se emite un WARNING y el script sigue.
+-- Escritas contra los nombres de columna REALES de Ferrecolor.
+-- Cada una en su bloque: un fallo emite WARNING y el script sigue.
 -- =============================================================================
 
 -- REPORTES DE VENTAS (línea a línea, con marca y línea de producto)
 DO $v$ BEGIN EXECUTE $q$
 CREATE OR REPLACE VIEW asunhome.v_reporte_ventas AS
 SELECT
-  v.id                AS venta_id,
-  v.empresa_id,
-  v.fecha,
-  v.numero_control,
-  v.estado,
-  v.tipo_venta,
-  v.moneda,
-  v.cliente_id,
-  vi.id               AS item_id,
-  vi.producto_id,
-  vi.producto_nombre,
-  vi.sku,
-  p.marca_id,
-  m.nombre            AS marca,
-  p.linea_id,
-  l.nombre            AS linea_producto,
-  vi.cantidad,
-  vi.precio_venta,
-  vi.subtotal,
-  vi.monto_iva,
-  vi.total_linea,
+  v.id AS venta_id, v.empresa_id, v.fecha, v.numero_control, v.estado,
+  v.tipo_venta, v.moneda, v.metodo_pago, v.caja_id, v.cliente_id,
+  cl.nombre AS cliente, cl.ruc AS cliente_ruc,
+  vi.id AS item_id, vi.producto_id, vi.producto_nombre, vi.sku,
+  p.marca_id, m.nombre AS marca,
+  p.linea_id, l.nombre AS linea_producto,
+  vi.cantidad, vi.precio_venta, vi.subtotal, vi.monto_iva, vi.total_linea,
   p.costo_promedio,
-  (vi.cantidad * coalesce(p.costo_promedio, 0))                   AS costo_total_linea,
-  (vi.subtotal - vi.cantidad * coalesce(p.costo_promedio, 0))     AS margen_bruto
+  (vi.cantidad * coalesce(p.costo_promedio, 0))               AS costo_total_linea,
+  (vi.subtotal - vi.cantidad * coalesce(p.costo_promedio, 0)) AS margen_bruto
 FROM asunhome.ventas v
-JOIN asunhome.ventas_items vi ON vi.venta_id = v.id
-LEFT JOIN asunhome.productos p        ON p.id = vi.producto_id
-LEFT JOIN asunhome.marcas m           ON m.id = p.marca_id
-LEFT JOIN asunhome.lineas_producto l  ON l.id = p.linea_id
+JOIN asunhome.ventas_items vi        ON vi.venta_id = v.id
+LEFT JOIN asunhome.clientes cl       ON cl.id = v.cliente_id
+LEFT JOIN asunhome.productos p       ON p.id = vi.producto_id
+LEFT JOIN asunhome.marcas m          ON m.id = p.marca_id
+LEFT JOIN asunhome.lineas_producto l ON l.id = p.linea_id
+WHERE v.anulada_at IS NULL
 $q$; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'v_reporte_ventas: %', SQLERRM; END; $v$;
 
 
--- REPORTE STOCK (global + desglose salón / depósito)
+-- REPORTE STOCK
 DO $v$ BEGIN EXECUTE $q$
 CREATE OR REPLACE VIEW asunhome.v_reporte_stock AS
 SELECT
-  p.id                AS producto_id,
-  p.empresa_id,
-  p.nombre            AS producto,
-  p.sku,
-  m.nombre            AS marca,
-  l.nombre            AS linea_producto,
-  p.stock_actual,
-  p.stock_minimo,
-  (p.stock_actual <= p.stock_minimo)                          AS bajo_minimo,
-  p.costo_promedio,
-  p.precio_venta,
-  (p.stock_actual * coalesce(p.costo_promedio, 0))            AS valor_costo,
-  (p.stock_actual * coalesce(p.precio_venta, 0))              AS valor_venta,
-  p.activo
+  p.id AS producto_id, p.empresa_id, p.nombre AS producto, p.sku,
+  p.codigo_barras, m.nombre AS marca, l.nombre AS linea_producto,
+  cat.nombre AS categoria, u.nombre AS ubicacion_principal,
+  p.stock_actual, p.stock_minimo,
+  (p.stock_actual <= p.stock_minimo)                AS bajo_minimo,
+  p.costo_promedio, p.precio_venta,
+  (p.stock_actual * coalesce(p.costo_promedio, 0))  AS valor_costo,
+  (p.stock_actual * coalesce(p.precio_venta, 0))    AS valor_venta,
+  p.maneja_series, p.activo
 FROM asunhome.productos p
-LEFT JOIN asunhome.marcas m          ON m.id = p.marca_id
-LEFT JOIN asunhome.lineas_producto l ON l.id = p.linea_id
+LEFT JOIN asunhome.marcas m                    ON m.id = p.marca_id
+LEFT JOIN asunhome.lineas_producto l           ON l.id = p.linea_id
+LEFT JOIN asunhome.categorias_productos cat    ON cat.id = p.categoria_principal_id
+LEFT JOIN asunhome.inventario_ubicaciones u    ON u.id = p.ubicacion_principal_id
 $q$; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'v_reporte_stock: %', SQLERRM; END; $v$;
 
+
+-- INVENTARIO STOCK SALON / STOCK DEPOSITO
 DO $v$ BEGIN EXECUTE $q$
 CREATE OR REPLACE VIEW asunhome.v_reporte_stock_ubicacion AS
 SELECT
-  su.empresa_id,
-  su.producto_id,
-  p.nombre            AS producto,
-  p.sku,
-  u.id                AS ubicacion_id,
-  u.nombre            AS ubicacion,
-  u.tipo              AS ubicacion_tipo,     -- 'salon' | 'deposito' | ...
-  su.stock_actual,
-  su.stock_minimo,
-  su.stock_maximo,
+  su.empresa_id, su.producto_id, p.nombre AS producto, p.sku,
+  m.nombre AS marca,
+  u.id AS ubicacion_id, u.nombre AS ubicacion,
+  u.tipo AS ubicacion_tipo,                  -- 'salon' | 'deposito' | ...
+  su.stock_actual, su.stock_minimo, su.stock_maximo,
   (su.stock_actual * coalesce(p.costo_promedio, 0)) AS valor_costo
 FROM asunhome.inventario_stock_ubicacion su
 JOIN asunhome.inventario_ubicaciones u ON u.id = su.ubicacion_id
 JOIN asunhome.productos p              ON p.id = su.producto_id
+LEFT JOIN asunhome.marcas m            ON m.id = p.marca_id
 $q$; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'v_reporte_stock_ubicacion: %', SQLERRM; END; $v$;
 
 
@@ -1161,11 +1093,9 @@ $q$; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'v_reporte_stock_ubicacion: %', SQ
 DO $v$ BEGIN EXECUTE $q$
 CREATE OR REPLACE VIEW asunhome.v_reporte_linea_producto AS
 SELECT
-  l.empresa_id,
-  l.id                                          AS linea_id,
-  l.nombre                                      AS linea_producto,
-  count(DISTINCT p.id)                          AS productos,
-  coalesce(sum(p.stock_actual), 0)              AS stock_total,
+  l.empresa_id, l.id AS linea_id, l.nombre AS linea_producto,
+  count(DISTINCT p.id)                                AS productos,
+  coalesce(sum(p.stock_actual), 0)                    AS stock_total,
   coalesce(sum(p.stock_actual * p.costo_promedio), 0) AS valor_costo,
   coalesce(sum(p.stock_actual * p.precio_venta), 0)   AS valor_venta
 FROM asunhome.lineas_producto l
@@ -1178,11 +1108,9 @@ $q$; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'v_reporte_linea_producto: %', SQL
 DO $v$ BEGIN EXECUTE $q$
 CREATE OR REPLACE VIEW asunhome.v_reporte_marca AS
 SELECT
-  m.empresa_id,
-  m.id                                          AS marca_id,
-  m.nombre                                      AS marca,
-  count(DISTINCT p.id)                          AS productos,
-  coalesce(sum(p.stock_actual), 0)              AS stock_total,
+  m.empresa_id, m.id AS marca_id, m.nombre AS marca,
+  count(DISTINCT p.id)                                AS productos,
+  coalesce(sum(p.stock_actual), 0)                    AS stock_total,
   coalesce(sum(p.stock_actual * p.costo_promedio), 0) AS valor_costo,
   coalesce(sum(p.stock_actual * p.precio_venta), 0)   AS valor_venta
 FROM asunhome.marcas m
@@ -1191,42 +1119,34 @@ GROUP BY m.empresa_id, m.id, m.nombre
 $q$; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'v_reporte_marca: %', SQLERRM; END; $v$;
 
 
--- REPORTE PROVEEDOR (compras acumuladas por proveedor)
+-- REPORTE PROVEEDOR
 DO $v$ BEGIN EXECUTE $q$
 CREATE OR REPLACE VIEW asunhome.v_reporte_proveedor AS
 SELECT
-  c.empresa_id,
-  c.proveedor_id,
-  pr.nombre                        AS proveedor,
-  pr.ruc,
-  count(*)                         AS compras,
-  coalesce(sum(c.cantidad), 0)     AS unidades,
-  coalesce(sum(c.total), 0)        AS total_comprado,
-  min(c.fecha)                     AS primera_compra,
-  max(c.fecha)                     AS ultima_compra
+  c.empresa_id, c.proveedor_id, pr.nombre AS proveedor, pr.ruc,
+  count(*)                     AS compras,
+  coalesce(sum(c.cantidad), 0) AS unidades,
+  coalesce(sum(c.total), 0)    AS total_comprado,
+  min(c.fecha)                 AS primera_compra,
+  max(c.fecha)                 AS ultima_compra
 FROM asunhome.compras c
 LEFT JOIN asunhome.proveedores pr ON pr.id = c.proveedor_id
-WHERE c.estado <> 'anulada'
+WHERE c.anulada_at IS NULL
 GROUP BY c.empresa_id, c.proveedor_id, pr.nombre, pr.ruc
 $q$; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'v_reporte_proveedor: %', SQLERRM; END; $v$;
 
 
--- COSTOS / PRECIO VENTA (margen por producto)
+-- COSTOS / PRECIO VENTA
 DO $v$ BEGIN EXECUTE $q$
 CREATE OR REPLACE VIEW asunhome.v_costos_precios AS
 SELECT
-  p.empresa_id,
-  p.id                AS producto_id,
-  p.nombre            AS producto,
-  p.sku,
-  m.nombre            AS marca,
-  l.nombre            AS linea_producto,
-  p.costo_promedio,
-  p.precio_venta,
+  p.empresa_id, p.id AS producto_id, p.nombre AS producto, p.sku,
+  m.nombre AS marca, l.nombre AS linea_producto,
+  p.costo_promedio, p.precio_venta, p.precio_mayorista, p.precio_distribuidor,
   (p.precio_venta - p.costo_promedio) AS margen_gs,
   CASE WHEN coalesce(p.costo_promedio, 0) > 0
        THEN round(((p.precio_venta - p.costo_promedio) / p.costo_promedio) * 100, 2)
-  END                 AS margen_pct,
+  END AS margen_pct,
   p.activo
 FROM asunhome.productos p
 LEFT JOIN asunhome.marcas m          ON m.id = p.marca_id
@@ -1234,33 +1154,24 @@ LEFT JOIN asunhome.lineas_producto l ON l.id = p.linea_id
 $q$; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'v_costos_precios: %', SQLERRM; END; $v$;
 
 
--- REPORTE CAJA (base también para el export a Excel)
+-- REPORTE CAJA (sobre `cajas` + `caja_movimientos` heredadas)
 DO $v$ BEGIN EXECUTE $q$
 CREATE OR REPLACE VIEW asunhome.v_reporte_caja AS
 SELECT
-  s.empresa_id,
-  s.id                AS sesion_id,
-  s.numero            AS sesion_numero,
-  s.usuario_id,
-  s.usuario_nombre,
-  s.estado            AS sesion_estado,
-  s.monto_apertura,
-  s.abierta_at,
-  s.cerrada_at,
-  mv.id               AS movimiento_id,
-  mv.fecha,
-  mv.tipo,
-  mv.concepto,
-  mv.metodo_pago,
-  mv.moneda,
-  mv.monto,
+  c.empresa_id,
+  c.id AS caja_id, c.numero_caja, c.estado AS caja_estado,
+  c.abierta_por, c.cerrada_por,
+  c.fecha_apertura, c.fecha_cierre,
+  c.monto_apertura, c.monto_cierre_contado, c.monto_esperado_efectivo, c.diferencia,
+  mv.id AS movimiento_id, mv.created_at AS fecha,
+  mv.tipo, mv.concepto, mv.medio_pago, mv.monto,
   CASE WHEN mv.tipo = 'ingreso' THEN mv.monto ELSE -mv.monto END AS monto_con_signo,
-  mv.venta_id,
-  mv.cliente_id,
-  mv.referencia,
-  mv.descripcion
-FROM asunhome.caja_sesiones s
-LEFT JOIN asunhome.caja_movimientos mv ON mv.sesion_id = s.id
+  mv.usuario_id, mv.usuario_email,
+  mv.venta_id, mv.devolucion_id, mv.orden_servicio_id, mv.cliente_id,
+  mv.observacion,
+  (mv.anulado_at IS NOT NULL) AS anulado
+FROM asunhome.cajas c
+LEFT JOIN asunhome.caja_movimientos mv ON mv.caja_id = c.id
 $q$; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'v_reporte_caja: %', SQLERRM; END; $v$;
 
 
@@ -1268,22 +1179,17 @@ $q$; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'v_reporte_caja: %', SQLERRM; END;
 DO $v$ BEGIN EXECUTE $q$
 CREATE OR REPLACE VIEW asunhome.v_cliente_historial_compras AS
 SELECT
-  v.empresa_id,
-  v.cliente_id,
-  v.id                AS venta_id,
-  v.numero_control,
-  v.fecha,
-  v.estado,
-  v.tipo_venta,
-  v.moneda,
-  v.total,
+  v.empresa_id, v.cliente_id, cl.nombre AS cliente, cl.ruc,
+  v.id AS venta_id, v.numero_control, v.fecha, v.estado, v.tipo_venta,
+  v.moneda, v.metodo_pago, v.total,
   count(vi.id)                  AS items,
   coalesce(sum(vi.cantidad), 0) AS unidades
 FROM asunhome.ventas v
+JOIN asunhome.clientes cl          ON cl.id = v.cliente_id
 LEFT JOIN asunhome.ventas_items vi ON vi.venta_id = v.id
-WHERE v.cliente_id IS NOT NULL
-GROUP BY v.empresa_id, v.cliente_id, v.id, v.numero_control, v.fecha,
-         v.estado, v.tipo_venta, v.moneda, v.total
+WHERE v.anulada_at IS NULL
+GROUP BY v.empresa_id, v.cliente_id, cl.nombre, cl.ruc, v.id, v.numero_control,
+         v.fecha, v.estado, v.tipo_venta, v.moneda, v.metodo_pago, v.total
 $q$; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'v_cliente_historial_compras: %', SQLERRM; END; $v$;
 
 
@@ -1291,61 +1197,76 @@ $q$; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'v_cliente_historial_compras: %', 
 DO $v$ BEGIN EXECUTE $q$
 CREATE OR REPLACE VIEW asunhome.v_trazabilidad_series AS
 SELECT
-  s.empresa_id,
-  s.id                AS serie_id,
-  s.numero_serie,
-  s.estado,
-  p.id                AS producto_id,
-  p.nombre            AS producto,
-  p.sku,
-  m.nombre            AS marca,
-  l.nombre            AS linea_producto,
-  pr.id               AS proveedor_id,
-  pr.nombre           AS proveedor,
-  pr.ruc              AS proveedor_ruc,
-  pr.telefono         AS proveedor_telefono,
-  s.compra_id,
-  s.fecha_ingreso,
-  s.venta_id,
-  s.cliente_id,
-  s.fecha_venta,
-  s.garantia_hasta,
-  u.nombre            AS ubicacion,
-  av.id               AS averia_id,
-  av.estado           AS averia_estado,
-  av.motivo           AS averia_motivo,
+  s.empresa_id, s.id AS serie_id, s.numero_serie, s.estado,
+  p.id AS producto_id, p.nombre AS producto, p.sku,
+  m.nombre AS marca, l.nombre AS linea_producto,
+  pr.id AS proveedor_id, pr.nombre AS proveedor, pr.ruc AS proveedor_ruc,
+  pr.telefono AS proveedor_telefono,
+  s.compra_id, co.numero_factura AS compra_numero_factura, s.fecha_ingreso,
+  s.venta_id, s.cliente_id, cl.nombre AS cliente, s.fecha_venta, s.garantia_hasta,
+  u.nombre AS ubicacion,
+  av.id AS averia_id, av.estado AS averia_estado, av.motivo AS averia_motivo,
   av.fecha_deteccion,
   s.observaciones
 FROM asunhome.producto_series s
-JOIN asunhome.productos p                ON p.id = s.producto_id
-LEFT JOIN asunhome.marcas m              ON m.id = p.marca_id
-LEFT JOIN asunhome.lineas_producto l     ON l.id = p.linea_id
-LEFT JOIN asunhome.proveedores pr        ON pr.id = s.proveedor_id
+JOIN asunhome.productos p                   ON p.id = s.producto_id
+LEFT JOIN asunhome.marcas m                 ON m.id = p.marca_id
+LEFT JOIN asunhome.lineas_producto l        ON l.id = p.linea_id
+LEFT JOIN asunhome.proveedores pr           ON pr.id = s.proveedor_id
+LEFT JOIN asunhome.compras co               ON co.id = s.compra_id
+LEFT JOIN asunhome.clientes cl              ON cl.id = s.cliente_id
 LEFT JOIN asunhome.inventario_ubicaciones u ON u.id = s.ubicacion_id
 LEFT JOIN asunhome.productos_averiados av   ON av.serie_id = s.id
 $q$; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'v_trazabilidad_series: %', SQLERRM; END; $v$;
 
 
+-- SERVICIO TECNICO: tablero de órdenes
+DO $v$ BEGIN EXECUTE $q$
+CREATE OR REPLACE VIEW asunhome.v_servicio_tecnico AS
+SELECT
+  o.empresa_id, o.id AS orden_id, o.numero, o.estado, o.tipo, o.prioridad,
+  o.cliente_id, coalesce(cl.nombre, o.cliente_nombre) AS cliente,
+  coalesce(cl.ruc, o.cliente_ruc) AS cliente_ruc,
+  coalesce(cl.telefono, o.cliente_telefono) AS cliente_telefono,
+  o.producto_id, p.nombre AS producto, o.numero_serie,
+  m.nombre AS marca, pr.nombre AS proveedor,
+  o.tecnico_id, o.tecnico_nombre,
+  o.falla_reportada, o.diagnostico, o.trabajo_realizado,
+  o.costo_repuestos, o.costo_mano_obra, o.total,
+  o.fecha_ingreso, o.fecha_promesa, o.fecha_entrega,
+  (now() - o.fecha_ingreso)                                  AS antiguedad,
+  (o.fecha_promesa IS NOT NULL
+   AND o.fecha_promesa < now()
+   AND o.estado NOT IN ('entregado','rechazado','anulado'))  AS vencida,
+  o.presupuesto_id, ps.numero_control AS presupuesto_numero
+FROM asunhome.servicio_tecnico_ordenes o
+LEFT JOIN asunhome.clientes cl     ON cl.id = o.cliente_id
+LEFT JOIN asunhome.productos p     ON p.id = o.producto_id
+LEFT JOIN asunhome.marcas m        ON m.id = o.marca_id
+LEFT JOIN asunhome.proveedores pr  ON pr.id = o.proveedor_id
+LEFT JOIN asunhome.presupuestos ps ON ps.id = o.presupuesto_id
+$q$; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'v_servicio_tecnico: %', SQLERRM; END; $v$;
+
+
 -- =============================================================================
 -- PARTE 5 — RLS DE LAS TABLAS NUEVAS + GRANTS + EXPOSICIÓN
+--
+-- Las tablas heredadas ya traen su RLS y sus policies desde el clon (PARTE 2).
+-- Acá solo se cubren las 10 tablas nuevas.
 -- =============================================================================
 
--- ── 5.1 RLS en las tablas nuevas, con el mismo patrón multiempresa heredado ──
 DO $rls$
 DECLARE
-  v_sch   text := 'asunhome';
-  v_tabla text;
-  v_fn    boolean;
-  v_qual  text;
+  v_sch    text := 'asunhome';
+  v_tabla  text;
+  v_fn     boolean;
+  v_qual   text;
   v_nuevas text[] := ARRAY[
     'marcas','lineas_producto','producto_series','productos_averiados',
     'servicio_tecnico_ordenes','servicio_tecnico_items','servicio_tecnico_historial',
-    'presupuestos','presupuestos_items',
-    'ajuste_stock_autorizados','ajustes_stock','ajustes_stock_items',
-    'caja_sesiones','caja_movimientos'
+    'ajuste_stock_autorizados','ajustes_stock','ajustes_stock_items'
   ];
 BEGIN
-  -- ¿Existe el helper multiempresa dentro del schema clonado?
   SELECT EXISTS (
     SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = v_sch AND p.proname = 'puede_acceder_empresa'
@@ -1369,28 +1290,16 @@ BEGIN
 
     EXECUTE format('ALTER TABLE %I.%I ENABLE ROW LEVEL SECURITY', v_sch, v_tabla);
     EXECUTE format('DROP POLICY IF EXISTS %I ON %I.%I', v_tabla || '_all', v_sch, v_tabla);
-
-    -- las tablas hijas sin empresa_id no aplican el filtro por empresa
-    IF EXISTS (
-      SELECT 1 FROM information_schema.columns
-      WHERE table_schema = v_sch AND table_name = v_tabla AND column_name = 'empresa_id'
-    ) THEN
-      EXECUTE format(
-        'CREATE POLICY %I ON %I.%I FOR ALL TO authenticated USING (%s) WITH CHECK (%s)',
-        v_tabla || '_all', v_sch, v_tabla, v_qual, v_qual
-      );
-    ELSE
-      EXECUTE format(
-        'CREATE POLICY %I ON %I.%I FOR ALL TO authenticated USING (true) WITH CHECK (true)',
-        v_tabla || '_all', v_sch, v_tabla
-      );
-    END IF;
+    EXECUTE format(
+      'CREATE POLICY %I ON %I.%I FOR ALL TO authenticated USING (%s) WITH CHECK (%s)',
+      v_tabla || '_all', v_sch, v_tabla, v_qual, v_qual
+    );
   END LOOP;
 END;
 $rls$;
 
 
--- ── 5.2 Grants ───────────────────────────────────────────────────────────────
+-- ── Grants ───────────────────────────────────────────────────────────────────
 
 GRANT USAGE ON SCHEMA asunhome TO postgres, anon, authenticated, service_role;
 
@@ -1402,9 +1311,7 @@ GRANT EXECUTE                        ON ALL ROUTINES  IN SCHEMA asunhome TO auth
 GRANT ALL                            ON ALL ROUTINES  IN SCHEMA asunhome TO postgres;
 
 -- `anon` no recibe permisos de datos: el ERP exige sesión autenticada.
--- Si algún endpoint público lo necesitara, otorgar SELECT tabla por tabla.
 
--- Default privileges: lo que se cree después hereda los mismos permisos.
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA asunhome
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA asunhome
@@ -1417,15 +1324,10 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA asunhome
   GRANT EXECUTE ON FUNCTIONS TO authenticated, service_role;
 
 
--- ── 5.3 Exponer el schema en PostgREST ──────────────────────────────────────
--- En Supabase self-hosted esto se define por variable de entorno del contenedor
--- `rest` (PGRST_DB_SCHEMAS) y del `kong`/`postgrest` según tu compose:
---
+-- ── Exponer el schema en PostgREST ──────────────────────────────────────────
 --   PGRST_DB_SCHEMAS=public,graphql_public,asunhome
 --   PGRST_DB_EXTRA_SEARCH_PATH=public,extensions,asunhome
---
--- Tras cambiarlo, reiniciar el servicio rest. El NOTIFY de abajo recarga el
--- cache de esquema sin reiniciar.
+-- Reiniciar el servicio `rest` tras cambiarlo. El NOTIFY recarga el cache.
 NOTIFY pgrst, 'reload schema';
 
 
@@ -1433,94 +1335,94 @@ NOTIFY pgrst, 'reload schema';
 -- PARTE 6 — VERIFICACIÓN
 -- =============================================================================
 
--- 6.1 Comparación origen vs destino (tablas, vistas, funciones)
-SELECT
-  'tablas'    AS objeto,
-  (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'ferrecolor' AND c.relkind = 'r') AS ferrecolor,
-  (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'asunhome'   AND c.relkind = 'r') AS asunhome
-UNION ALL
-SELECT 'vistas',
-  (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'ferrecolor' AND c.relkind = 'v'),
-  (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'asunhome'   AND c.relkind = 'v')
-UNION ALL
-SELECT 'funciones',
-  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = 'ferrecolor'),
-  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = 'asunhome')
-UNION ALL
-SELECT 'indices',
-  (SELECT count(*) FROM pg_indexes WHERE schemaname = 'ferrecolor'),
-  (SELECT count(*) FROM pg_indexes WHERE schemaname = 'asunhome')
-UNION ALL
-SELECT 'policies',
-  (SELECT count(*) FROM pg_policies WHERE schemaname = 'ferrecolor'),
-  (SELECT count(*) FROM pg_policies WHERE schemaname = 'asunhome');
+-- 6.1 Origen vs destino
+SELECT 'tablas' AS objeto,
+  (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='ferrecolor' AND c.relkind='r') AS ferrecolor,
+  (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='asunhome'   AND c.relkind='r') AS asunhome
+UNION ALL SELECT 'vistas',
+  (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='ferrecolor' AND c.relkind='v'),
+  (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='asunhome'   AND c.relkind='v')
+UNION ALL SELECT 'funciones',
+  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='ferrecolor'),
+  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='asunhome')
+UNION ALL SELECT 'indices',
+  (SELECT count(*) FROM pg_indexes WHERE schemaname='ferrecolor'),
+  (SELECT count(*) FROM pg_indexes WHERE schemaname='asunhome')
+UNION ALL SELECT 'policies',
+  (SELECT count(*) FROM pg_policies WHERE schemaname='ferrecolor'),
+  (SELECT count(*) FROM pg_policies WHERE schemaname='asunhome');
 
--- 6.2 Tablas del origen que NO quedaron en el destino (debería dar 0 filas)
+-- 6.2 Tablas del origen que faltan en el destino (esperado: 0 filas)
 SELECT c.relname AS falta_en_asunhome
-FROM pg_class c
-JOIN pg_namespace n ON n.oid = c.relnamespace
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'ferrecolor' AND c.relkind = 'r'
   AND NOT EXISTS (
     SELECT 1 FROM pg_class c2 JOIN pg_namespace n2 ON n2.oid = c2.relnamespace
-    WHERE n2.nspname = 'asunhome' AND c2.relname = c.relname
-  )
+    WHERE n2.nspname = 'asunhome' AND c2.relname = c.relname)
 ORDER BY 1;
 
--- 6.3 Referencias residuales al schema origen (debería dar 0 filas)
-SELECT 'constraint' AS tipo, cf.relname AS objeto, c.conname AS nombre,
-       pg_get_constraintdef(c.oid) AS definicion
+-- 6.3 Referencias residuales al origen (esperado: 0 filas)
+SELECT 'constraint' AS tipo, cf.relname AS objeto, c.conname AS nombre
 FROM pg_constraint c
-JOIN pg_class cf     ON cf.oid = c.conrelid
+JOIN pg_class cf ON cf.oid = c.conrelid
 JOIN pg_namespace nf ON nf.oid = cf.relnamespace
-WHERE nf.nspname = 'asunhome'
-  AND pg_get_constraintdef(c.oid) ~ '\mferrecolor\M'
+WHERE nf.nspname = 'asunhome' AND pg_get_constraintdef(c.oid) ~ '\mferrecolor\M'
 UNION ALL
-SELECT 'funcion', p.proname, p.proname, left(pg_get_functiondef(p.oid), 200)
+SELECT 'funcion', p.proname, p.proname
 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-WHERE n.nspname = 'asunhome'
-  AND p.prokind IN ('f','p')
+WHERE n.nspname = 'asunhome' AND p.prokind IN ('f','p')
   AND pg_get_functiondef(p.oid) ~ '\mferrecolor\M';
 
--- 6.4 Confirmar que el destino está VACÍO de datos
+-- 6.4 El destino debe estar VACÍO de datos (esperado: 0 filas)
 SELECT c.relname AS tabla, c.reltuples::bigint AS filas_estimadas
-FROM pg_class c
-JOIN pg_namespace n ON n.oid = c.relnamespace
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'asunhome' AND c.relkind = 'r' AND c.reltuples > 0
 ORDER BY 2 DESC;
 
--- 6.5 Tablas nuevas creadas por la PARTE 3
+-- 6.5 Las 10 tablas nuevas (esperado: 10 filas)
 SELECT c.relname AS tabla_nueva
-FROM pg_class c
-JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname = 'asunhome'
-  AND c.relkind = 'r'
-  AND c.relname IN (
-    'marcas','lineas_producto','producto_series','productos_averiados',
-    'servicio_tecnico_ordenes','servicio_tecnico_items','servicio_tecnico_historial',
-    'presupuestos','presupuestos_items',
-    'ajuste_stock_autorizados','ajustes_stock','ajustes_stock_items',
-    'caja_sesiones','caja_movimientos'
-  )
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'asunhome' AND c.relkind = 'r'
+  AND c.relname IN ('marcas','lineas_producto','producto_series','productos_averiados',
+                    'servicio_tecnico_ordenes','servicio_tecnico_items','servicio_tecnico_historial',
+                    'ajuste_stock_autorizados','ajustes_stock','ajustes_stock_items')
 ORDER BY 1;
+
+-- 6.6 Columnas nuevas sobre tablas heredadas (esperado: 20 filas)
+SELECT table_name, column_name
+FROM information_schema.columns
+WHERE table_schema = 'asunhome'
+  AND (table_name, column_name) IN (
+    ('productos','marca_id'),('productos','linea_id'),('productos','maneja_series'),('productos','garantia_meses'),
+    ('presupuestos','origen'),('presupuestos','orden_servicio_id'),('presupuestos','tipo_cambio'),
+    ('presupuestos','vendedor_id'),('presupuestos','vendedor_nombre'),('presupuestos','condiciones'),
+    ('presupuesto_items','orden'),('presupuesto_items','observaciones'),
+    ('cajas','ubicacion_id'),
+    ('caja_movimientos','orden_servicio_id'),('caja_movimientos','cliente_id'),
+    ('movimientos_inventario','ubicacion_origen_id'),('movimientos_inventario','ubicacion_destino_id'),
+    ('movimientos_inventario','serie_id'),('movimientos_inventario','ajuste_id'),
+    ('movimientos_inventario','orden_servicio_id'))
+ORDER BY 1, 2;
+
+-- 6.7 Los CHECK ampliados conservan los valores heredados
+SELECT cf.relname AS tabla, con.conname, pg_get_constraintdef(con.oid) AS definicion
+FROM pg_constraint con
+JOIN pg_class cf ON cf.oid = con.conrelid
+JOIN pg_namespace n ON n.oid = cf.relnamespace
+WHERE n.nspname = 'asunhome' AND con.contype = 'c'
+  AND con.conname IN ('movimientos_inventario_tipo_check','movimientos_inventario_origen_check',
+                      'presupuestos_estado_check','presupuestos_origen_check')
+ORDER BY 1, 2;
 
 
 -- =============================================================================
 -- OPCIONAL — Semillas mínimas (ejecutar DESPUÉS de crear la empresa)
--- Reemplazar '<EMPRESA_UUID>' por el id real y descomentar.
+-- Reemplazar '<EMPRESA_UUID>' / '<USUARIO_UUID>' y descomentar.
 -- =============================================================================
 -- INSERT INTO asunhome.inventario_ubicaciones (empresa_id, nombre, codigo, tipo)
--- VALUES
---   ('<EMPRESA_UUID>', 'Salón',    'SALON', 'salon'),
---   ('<EMPRESA_UUID>', 'Depósito', 'DEPO',  'deposito')
--- ON CONFLICT DO NOTHING;
+-- VALUES ('<EMPRESA_UUID>', 'Salón', 'SALON', 'salon'),
+--        ('<EMPRESA_UUID>', 'Depósito', 'DEPO', 'deposito');
 --
--- -- Usuario único habilitado para ajustes de stock
 -- INSERT INTO asunhome.ajuste_stock_autorizados (empresa_id, usuario_id, usuario_email, motivo)
 -- VALUES ('<EMPRESA_UUID>', '<USUARIO_UUID>', 'encargado@asunhome.com.py', 'Encargado de inventario');
 
