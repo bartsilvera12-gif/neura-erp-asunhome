@@ -556,20 +556,21 @@ ALTER TABLE asunhome.presupuestos
   ADD COLUMN IF NOT EXISTS created_by        uuid,
   ADD COLUMN IF NOT EXISTS updated_by        uuid;
 
+-- Los CHECK se aplican via EXECUTE con el DDL en una sola linea: asi la
+-- sentencia no puede partirse ni por plpgsql ni por el cliente SQL, y un
+-- eventual fallo queda capturado en runtime en vez de romper el parseo.
 DO $p$
 BEGIN
   BEGIN
-    ALTER TABLE asunhome.presupuestos DROP CONSTRAINT IF EXISTS presupuestos_origen_check;
-    ALTER TABLE asunhome.presupuestos ADD CONSTRAINT presupuestos_origen_check
-      CHECK (origen IN ('venta','servicio_tecnico'));
+    EXECUTE 'ALTER TABLE asunhome.presupuestos DROP CONSTRAINT IF EXISTS presupuestos_origen_check';
+    EXECUTE 'ALTER TABLE asunhome.presupuestos ADD CONSTRAINT presupuestos_origen_check CHECK (origen IN (''venta'',''servicio_tecnico''))';
   EXCEPTION WHEN OTHERS THEN RAISE WARNING 'presupuestos_origen_check: %', SQLERRM; END;
 
   -- Ampliar el estado heredado (creado/enviado/aprobado/rechazado/convertido)
   -- con 'vencido', que hace falta porque la tabla ya maneja validez_dias.
   BEGIN
-    ALTER TABLE asunhome.presupuestos DROP CONSTRAINT IF EXISTS presupuestos_estado_check;
-    ALTER TABLE asunhome.presupuestos ADD CONSTRAINT presupuestos_estado_check
-      CHECK (estado IN ('creado','enviado','aprobado','rechazado','convertido','vencido'));
+    EXECUTE 'ALTER TABLE asunhome.presupuestos DROP CONSTRAINT IF EXISTS presupuestos_estado_check';
+    EXECUTE 'ALTER TABLE asunhome.presupuestos ADD CONSTRAINT presupuestos_estado_check CHECK (estado IN (''creado'',''enviado'',''aprobado'',''rechazado'',''convertido'',''vencido''))';
   EXCEPTION WHEN OTHERS THEN RAISE WARNING 'presupuestos_estado_check: %', SQLERRM; END;
 END;
 $p$;
@@ -638,22 +639,20 @@ CREATE INDEX IF NOT EXISTS idx_mov_inv_serie        ON asunhome.movimientos_inve
 -- Los CHECK se AMPLÍAN preservando todos los valores que Ferrecolor ya usa
 -- ('produccion' y 'devolucion_venta' incluidos): solo se agregan los nuevos.
 DO $mov$
+DECLARE
+  -- heredados de Ferrecolor (NO se quitan) + nuevos de ASUNHOME
+  v_origen text := '''compra'',''venta'',''ajuste_manual'',''inventario_inicial'',''produccion'',''devolucion_venta'','
+                || '''transferencia'',''servicio_tecnico'',''averia'',''devolucion_proveedor''';
+  v_tipo   text := '''ENTRADA'',''SALIDA'',''AJUSTE'',''TRANSFERENCIA''';
 BEGIN
   BEGIN
-    ALTER TABLE asunhome.movimientos_inventario DROP CONSTRAINT IF EXISTS movimientos_inventario_tipo_check;
-    ALTER TABLE asunhome.movimientos_inventario ADD CONSTRAINT movimientos_inventario_tipo_check
-      CHECK (tipo IN ('ENTRADA','SALIDA','AJUSTE','TRANSFERENCIA'));
+    EXECUTE 'ALTER TABLE asunhome.movimientos_inventario DROP CONSTRAINT IF EXISTS movimientos_inventario_tipo_check';
+    EXECUTE 'ALTER TABLE asunhome.movimientos_inventario ADD CONSTRAINT movimientos_inventario_tipo_check CHECK (tipo IN (' || v_tipo || '))';
   EXCEPTION WHEN OTHERS THEN RAISE WARNING 'movimientos_inventario tipo_check: %', SQLERRM; END;
 
   BEGIN
-    ALTER TABLE asunhome.movimientos_inventario DROP CONSTRAINT IF EXISTS movimientos_inventario_origen_check;
-    ALTER TABLE asunhome.movimientos_inventario ADD CONSTRAINT movimientos_inventario_origen_check
-      CHECK (origen IN (
-        -- heredados de Ferrecolor (no tocar)
-        'compra','venta','ajuste_manual','inventario_inicial','produccion','devolucion_venta',
-        -- nuevos de ASUNHOME
-        'transferencia','servicio_tecnico','averia','devolucion_proveedor'
-      ));
+    EXECUTE 'ALTER TABLE asunhome.movimientos_inventario DROP CONSTRAINT IF EXISTS movimientos_inventario_origen_check';
+    EXECUTE 'ALTER TABLE asunhome.movimientos_inventario ADD CONSTRAINT movimientos_inventario_origen_check CHECK (origen IN (' || v_origen || '))';
   EXCEPTION WHEN OTHERS THEN RAISE WARNING 'movimientos_inventario origen_check: %', SQLERRM; END;
 END;
 $mov$;
