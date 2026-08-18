@@ -1,0 +1,9 @@
+---
+description: Tras cada commit, subir siempre los cambios a GitHub (origin).
+alwaysApply: true
+---
+
+# Git y GitHub
+
+- Cuando completes un commit en este repositorio, **ejecutá `git push origin` a la rama correspondiente** (normalmente `main`) en el mismo flujo de trabajo, salvo que el usuario pida explícitamente no subir.
+- Objetivo: que **Vercel y el remoto** vean el mismo estado que el commit local; no dejar el trabajo solo en la máquina local.

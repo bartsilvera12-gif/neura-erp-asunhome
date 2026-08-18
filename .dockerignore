@@ -1,0 +1,16 @@
+.git
+.github
+node_modules
+.next
+out
+build
+coverage
+npm-debug.log*
+.DS_Store
+.env
+.env.*
+!.env.example
+supabase/.temp
+supabase/.branches
+e2e-super-admin*.png
+*.tsbuildinfo

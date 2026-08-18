@@ -1,0 +1,225 @@
+@import "tailwindcss";
+
+/* Neura ERP — Zentra (paleta turquesa rediseño 2026: #4FAEB2 primary) */
+:root {
+  --background: #F8FAFC;
+  --foreground: #0F172A;
+  --foreground-muted: #475569;
+  --card: #FFFFFF;
+  /* Sidebar Zentra: deep teal #0B3A3D con elevated #104A4E. */
+  --zentra-sidebar: #0B3A3D;
+  --zentra-sidebar-elevated: #104A4E;
+  --zentra-sidebar-border: rgba(255, 255, 255, 0.08);
+  --zentra-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --zentra-sidebar-active: rgba(255, 255, 255, 0.18);
+  --zentra-sidebar-accent: #4FAEB2;
+  --zentra-login-bg-mid: #145053;
+  --zentra-login-bg-deep: #0a3437;
+  --sidebar: var(--zentra-sidebar);
+  --primary: #4FAEB2;
+  --primary-hover: #3F8E91;
+  --primary-label: #3F8E91;
+  --primary-light: #E5F4F4;
+  --border: #E2E8F0;
+  /* Badges de estado */
+  --badge-success-bg: #DCFCE7;
+  --badge-success-text: #166534;
+  --badge-warning-bg: #FEF9C3;
+  --badge-warning-text: #854D0E;
+  --badge-error-bg: #FEE2E2;
+  --badge-error-text: #991B1B;
+}
+
+.dark {
+  --background: #0F172A;
+  --foreground: #F8FAFC;
+  --foreground-muted: #94A3B8;
+  --card: #1E293B;
+  /* Lateral ERP: misma identidad en modo oscuro */
+  --sidebar: var(--zentra-sidebar);
+  --primary: #4FAEB2;
+  --primary-hover: #3F8E91;
+  --primary-label: #3F8E91;
+  --primary-light: #1E4D4F;
+  --border: #334155;
+  --badge-success-bg: #14532D;
+  --badge-success-text: #86EFAC;
+  --badge-warning-bg: #713F12;
+  --badge-warning-text: #FDE047;
+  --badge-error-bg: #7F1D1D;
+  --badge-error-text: #FCA5A5;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-foreground-muted: var(--foreground-muted);
+  --font-sans: var(--font-plus-jakarta), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-plus-jakarta), system-ui, sans-serif;
+}
+
+/**
+ * Impresión cupones físicos (/sorteos/[id]/imprimir-cupones): el AppShell usa h-svh + overflow
+ * oculto en ancestros; en @media print eso suele dejar casi en blanco la hoja salvo cabecera/pie del navegador.
+ * La clase la agrega PhysicalCouponsPrintClient al montar.
+ */
+@media print {
+  html.physical-coupons-print-page,
+  html.physical-coupons-print-page body {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  html.physical-coupons-print-page #neura-sidebar,
+  html.physical-coupons-print-page #neura-header {
+    display: none !important;
+  }
+
+  html.physical-coupons-print-page #neura-app-shell {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  html.physical-coupons-print-page #neura-main-column {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  html.physical-coupons-print-page #neura-main-content {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+  }
+
+  html.physical-coupons-print-page .physical-coupons-print-area {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    position: relative !important;
+    width: 100% !important;
+    max-width: none !important;
+    overflow: visible !important;
+  }
+}
+
+/* Fondo pantalla login (solo layout visual) */
+.zentra-login-bg {
+  background:
+    radial-gradient(ellipse 100% 70% at 50% 0%, rgba(79, 174, 178, 0.14), transparent 52%),
+    linear-gradient(168deg, var(--zentra-login-bg-mid) 0%, var(--zentra-sidebar) 42%, var(--zentra-login-bg-deep) 100%);
+}
+
+/* =============================================================================
+   Override de colores brand — Zentra (#4FAEB2)
+   Reemplaza usos hex literales (Tailwind arbitrary values) en toda la app
+   sin tocar 293+ archivos. Solo afecta clases existentes; no toca semánticos
+   (green/red/amber/etc.).
+   Migrado de #14B8A6 a #4FAEB2 (rediseño Zentra 2026).
+   ============================================================================= */
+.bg-\[\#0EA5E9\]   { background-color: #4FAEB2 !important; }
+.bg-\[\#0284C7\]   { background-color: #3F8E91 !important; }
+.bg-\[\#38BDF8\]   { background-color: #4FAEB2 !important; }
+.bg-\[\#14B8A6\]   { background-color: #4FAEB2 !important; }
+.bg-\[\#0F9488\]   { background-color: #3F8E91 !important; }
+.hover\:bg-\[\#0EA5E9\]:hover { background-color: #4FAEB2 !important; }
+.hover\:bg-\[\#0284C7\]:hover { background-color: #3F8E91 !important; }
+.hover\:bg-\[\#14B8A6\]:hover { background-color: #4FAEB2 !important; }
+.hover\:bg-\[\#0F9488\]:hover { background-color: #3F8E91 !important; }
+
+.text-\[\#0EA5E9\] { color: #4FAEB2 !important; }
+.text-\[\#0284C7\] { color: #3F8E91 !important; }
+.text-\[\#38BDF8\] { color: #4FAEB2 !important; }
+.text-\[\#14B8A6\] { color: #4FAEB2 !important; }
+.text-\[\#0F9488\] { color: #3F8E91 !important; }
+.hover\:text-\[\#0284C7\]:hover { color: #3F8E91 !important; }
+
+.border-\[\#0EA5E9\] { border-color: #4FAEB2 !important; }
+.border-\[\#0284C7\] { border-color: #3F8E91 !important; }
+.border-\[\#14B8A6\] { border-color: #4FAEB2 !important; }
+
+.focus\:ring-\[\#0EA5E9\]:focus { --tw-ring-color: #4FAEB2 !important; }
+.focus\:border-\[\#0EA5E9\]:focus { border-color: #4FAEB2 !important; }
+.focus\:ring-\[\#14B8A6\]:focus { --tw-ring-color: #4FAEB2 !important; }
+.focus\:border-\[\#14B8A6\]:focus { border-color: #4FAEB2 !important; }
+
+/* =============================================================================
+   Sidebar — gradiente sutil estilo Zentra (top más claro, bottom más oscuro).
+   Base #0B3A3D con elevated #104A4E. La luz cae hacia esquina superior derecha,
+   sombra hacia abajo.
+   ============================================================================= */
+.zentra-sidebar-bg {
+  background:
+    radial-gradient(ellipse 120% 60% at 100% 0%, rgba(255, 255, 255, 0.06), transparent 55%),
+    radial-gradient(ellipse 120% 60% at 0% 0%, rgba(255, 255, 255, 0.04), transparent 55%),
+    linear-gradient(180deg, #104A4E 0%, #0B3A3D 35%, #082A2D 100%);
+}
+
+/* =============================================================================
+   Dashboard — shell oscuro teal estilo Zentra
+   ============================================================================= */
+/* =============================================================================
+   Pantalla de carga global — fondo teal con gradiente sutil + pulse del logo
+   ============================================================================= */
+.app-loading-bg {
+  background:
+    radial-gradient(ellipse 90% 60% at 50% 30%, rgba(255, 255, 255, 0.08), transparent 55%),
+    linear-gradient(168deg, #5CB8BC 0%, #4FAEB2 45%, #3E8C90 100%);
+}
+
+/* Logo Z: las dos mitades se separan suavemente y vuelven a su sitio */
+.app-loading-z-top {
+  transform-origin: center;
+  animation: app-loading-z-top 2.2s ease-in-out infinite;
+}
+.app-loading-z-bot {
+  transform-origin: center;
+  animation: app-loading-z-bot 2.2s ease-in-out infinite;
+}
+@keyframes app-loading-z-top {
+  0%, 100% { transform: translate(0, 0); }
+  50%      { transform: translate(6px, -6px); }
+}
+@keyframes app-loading-z-bot {
+  0%, 100% { transform: translate(0, 0); }
+  50%      { transform: translate(-6px, 6px); }
+}
+
+.app-loading-dots {
+  display: inline-block;
+  width: 1.6em;
+  text-align: left;
+  letter-spacing: 0;
+  animation: app-loading-dots 1.4s steps(4, end) infinite;
+}
+
+@keyframes app-loading-dots {
+  0%   { clip-path: inset(0 100% 0 0); }
+  25%  { clip-path: inset(0 66% 0 0); }
+  50%  { clip-path: inset(0 33% 0 0); }
+  75%  { clip-path: inset(0 0 0 0); }
+  100% { clip-path: inset(0 100% 0 0); }
+}
+
+.zentra-dashboard-shell {
+  background:
+    radial-gradient(ellipse 80% 40% at 50% 0%, rgba(79, 174, 178, 0.06), transparent 60%),
+    #F8FAFC;
+}
+
+
+
