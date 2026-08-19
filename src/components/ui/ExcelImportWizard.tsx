@@ -204,8 +204,11 @@ function FaltantesBox({ f }: { f: { categorias: string[]; proveedores: string[];
 function PreviewTable({ rows }: { rows: import("@/lib/excel/import-types").PreviewRow[] }) {
   const visibles = rows.slice(0, 200);
   return (
-    <div className="border rounded-lg overflow-hidden max-h-[40vh] overflow-y-auto">
-      <table className="w-full text-xs">
+    /* "overflow-auto" cubre ambos ejes (X + Y) en lugar de solo Y.
+       "min-w-[640px]" fuerza scroll horizontal en mobile para que las columnas
+       "Detalle" y "Mensajes" no se aplasten — sin esto el usuario importa a ciegas. */
+    <div className="border rounded-lg overflow-auto max-h-[40vh]">
+      <table className="w-full min-w-[640px] sm:min-w-0 text-xs">
         <thead className="bg-slate-50 text-slate-600 sticky top-0">
           <tr>
             <th className="text-left px-2 py-1.5">Fila</th>

@@ -9,6 +9,8 @@ export interface ProductoPickerItem {
   codigo_barras: string | null;
   codigo_barras_interno: boolean;
   precio_venta: number;
+  precio_mayorista: number;
+  precio_distribuidor?: number | null;
   costo_promedio: number;
   stock_actual: number;
   stock_minimo: number;
@@ -22,6 +24,14 @@ export interface ProductoPickerItem {
   ubicacion_tipo: string | null;
   /** Si false → producto preparado (Menú): no valida stock ni muestra "Sin stock". */
   controla_stock?: boolean;
+  /** Modo de receta: 'produccion_previa' (Menú stockeado) muestra stock real. */
+  modo_receta?: string;
+}
+
+/** Un Menú con produccion_previa maneja stock real del terminado (como reventa para mostrar). */
+function manejaStock(p: { controla_stock?: boolean; modo_receta?: string }): boolean {
+  if (p.controla_stock !== false) return true;
+  return p.modo_receta === "produccion_previa";
 }
 
 /**
@@ -35,6 +45,37 @@ export interface AgregarVentaPayload {
   cantidad: number;
   precio_input: number;
   iva: "EXENTA" | "5%" | "10%";
+  /** Nivel de precio elegido en el panel de detalle. */
+  tipo_precio: "minorista" | "mayorista" | "distribuidor";
+  /** Presentacion de venta elegida (Caja, Unidad, Paquete...). Opcional para
+   *  retrocompat: cuando no viene, el backend usa la default del producto. */
+  presentacion_id?: string | null;
+  presentacion_nombre?: string | null;
+  presentacion_cantidad_base?: number | null;
+}
+
+interface PresentacionLite {
+  id: string;
+  nombre: string;
+  cantidad_base: number;
+  precio_venta: number | null;
+  es_default: boolean;
+  activo: boolean;
+}
+
+/**
+ * Precio unitario (en PYG) según el tipo elegido, con fallbacks:
+ *  minorista → precio_venta;
+ *  mayorista    → precio_mayorista (>0) o fallback a precio_venta;
+ *  distribuidor → precio_distribuidor (>0) o fallback a precio_venta.
+ */
+function precioPorTipoPicker(
+  p: ProductoPickerItem,
+  tipo: "minorista" | "mayorista" | "distribuidor"
+): number {
+  if (tipo === "mayorista") return p.precio_mayorista != null && p.precio_mayorista > 0 ? p.precio_mayorista : p.precio_venta;
+  if (tipo === "distribuidor") return p.precio_distribuidor != null && p.precio_distribuidor > 0 ? p.precio_distribuidor : p.precio_venta;
+  return p.precio_venta;
 }
 
 interface Props {
@@ -72,7 +113,41 @@ export default function ProductPickerModal({
   const [cantidad, setCantidad] = useState("1");
   const [precio, setPrecio] = useState("");
   const [iva, setIva] = useState<"EXENTA" | "5%" | "10%">(ivaDefault);
+  const [tipoPrecio, setTipoPrecio] = useState<"minorista" | "mayorista" | "distribuidor">("minorista");
   const [feedback, setFeedback] = useState<string | null>(null);
+
+  // Presentaciones del producto seleccionado (Unidad, Caja, Paquete...).
+  // Se cargan al seleccionar el producto en el panel de detalle.
+  const [presentaciones, setPresentaciones] = useState<PresentacionLite[]>([]);
+  const [presentacionId, setPresentacionId] = useState<string>("");
+  const presSel = presentaciones.find((pp) => pp.id === presentacionId) ?? null;
+
+  /** Precio en la moneda activa de la venta (string para el input). */
+  function precioEnMonedaStr(precioGs: number): string {
+    if (moneda === "USD" && tipoCambio > 0) return String(Math.round((precioGs / tipoCambio) * 100) / 100);
+    return String(Math.round(precioGs));
+  }
+
+  /**
+   * Cambia el tipo de precio del producto seleccionado y ajusta el precio
+   * unitario CONSIDERANDO la presentacion actual:
+   *
+   * - Si la presentacion tiene un precio_venta override fijo, el tipo no
+   *   modifica el precio (override sticky — misma convencion que en
+   *   handlePresentacionChange).
+   * - Sin override: precio = precio_tipo * cantidad_base.
+   */
+  function handleTipoPrecio(tipo: "minorista" | "mayorista" | "distribuidor") {
+    setTipoPrecio(tipo);
+    setFeedback(null);
+    if (!sel) return;
+    if (presSel && presSel.precio_venta != null && presSel.precio_venta > 0) {
+      // Override sticky.
+      return;
+    }
+    const cantBase = presSel ? presSel.cantidad_base : 1;
+    setPrecio(precioEnMonedaStr(precioPorTipoPicker(sel, tipo) * cantBase));
+  }
 
   useEffect(() => { if (open) { setQ(""); setError(null); setSel(null); setTimeout(() => inputRef.current?.focus(), 50); } }, [open]);
   useEffect(() => {
@@ -111,15 +186,52 @@ export default function ProductPickerModal({
   function selectProducto(p: ProductoPickerItem) {
     setSel(p);
     setCantidad("1");
-    // Precio inicial: en la moneda de la venta
-    const precioGs = p.precio_venta;
-    if (moneda === "USD" && tipoCambio > 0) {
-      setPrecio(String(Math.round((precioGs / tipoCambio) * 100) / 100));
-    } else {
-      setPrecio(String(Math.round(precioGs)));
-    }
+    // Precio inicial: minorista (precio_venta) en la moneda de la venta.
+    setTipoPrecio("minorista");
+    setPrecio(precioEnMonedaStr(precioPorTipoPicker(p, "minorista")));
     setIva(ivaDefault);
     setFeedback(null);
+    // Reset y carga de presentaciones del producto.
+    setPresentaciones([]);
+    setPresentacionId("");
+    (async () => {
+      try {
+        const r = await fetch(`/api/productos/${p.id}/presentaciones`, {
+          credentials: "include",
+        });
+        const j = await r.json();
+        if (!r.ok || !j?.success) return;
+        const list = (j.data?.presentaciones ?? []) as PresentacionLite[];
+        const activos = list.filter((pp) => pp.activo);
+        setPresentaciones(activos);
+        const def = activos.find((pp) => pp.es_default) ?? activos[0] ?? null;
+        if (def) {
+          setPresentacionId(def.id);
+          // Si la presentacion default tiene override de precio, lo usamos como
+          // inicial (en minorista). Sino dejamos el precio_venta del producto.
+          if (def.precio_venta != null && def.precio_venta > 0) {
+            setPrecio(precioEnMonedaStr(def.precio_venta));
+          }
+        }
+      } catch {
+        // best-effort: si falla, el flujo legacy sigue funcionando (sin
+        // presentacion explicita el backend usa default automatica).
+      }
+    })();
+  }
+
+  /** Cambia la presentacion elegida y ajusta el precio sugerido. */
+  function handlePresentacionChange(id: string) {
+    setPresentacionId(id);
+    setFeedback(null);
+    const pp = presentaciones.find((x) => x.id === id);
+    if (!pp || !sel) return;
+    // Precio sugerido: override de presentacion > precio_base * cantidad_base.
+    const sugerido =
+      pp.precio_venta != null && pp.precio_venta > 0
+        ? pp.precio_venta
+        : Math.round(precioPorTipoPicker(sel, tipoPrecio) * pp.cantidad_base);
+    setPrecio(precioEnMonedaStr(sugerido));
   }
 
   function handleAgregar() {
@@ -129,18 +241,18 @@ export default function ProductPickerModal({
     if (cantNum <= 0) { setFeedback("Cantidad debe ser > 0"); return; }
     if (precioNum <= 0) { setFeedback("Precio debe ser > 0"); return; }
     if (moneda === "USD" && tipoCambio <= 0) { setFeedback("Falta tipo de cambio en la venta"); return; }
-    // Solo validar stock si el producto controla stock (Reventa).
-    // Productos del Menú (controla_stock=false) se agregan sin restricción.
-    const ctrlStock = sel.controla_stock !== false;
-    if (ctrlStock) {
-      const enCarrito = excludeIds.filter((id) => id === sel.id).length;
-      const disp = sel.stock_actual - enCarrito;
-      if (cantNum > disp) {
-        setFeedback(`Stock insuficiente (disponible ${disp})`);
-        return;
-      }
-    }
-    const ok = onAgregar({ producto: sel, cantidad: cantNum, precio_input: precioNum, iva });
+    // Venta sin stock (Fase 5): NO se bloquea por falta de stock; se permite agregar
+    // y la confirmación se pide al registrar la venta.
+    const ok = onAgregar({
+      producto: sel,
+      cantidad: cantNum,
+      precio_input: precioNum,
+      iva,
+      tipo_precio: tipoPrecio,
+      presentacion_id: presSel ? presSel.id : null,
+      presentacion_nombre: presSel ? presSel.nombre : null,
+      presentacion_cantidad_base: presSel ? presSel.cantidad_base : null,
+    });
     if (ok !== false) {
       setFeedback("Producto agregado ✓");
       setCantidad("1");
@@ -151,15 +263,36 @@ export default function ProductPickerModal({
   }
 
   if (!open) return null;
+  // Stock check: cuando la presentacion tiene cantidad_base > 1, el stock
+  // disponible en esa presentacion es stock_base / cantidad_base. Asi el
+  // selector de cantidad y la advertencia de stock estan en presentaciones,
+  // no en unidad base. dispBase es lo crudo del producto.
   const enCarritoSel = sel ? excludeIds.filter((id) => id === sel.id).length : 0;
-  const dispSel = sel ? sel.stock_actual - enCarritoSel : 0;
+  const dispBase = sel ? sel.stock_actual - enCarritoSel : 0;
+  const cantBase = presSel ? presSel.cantidad_base : 1;
+  const dispSel = cantBase > 0 ? Math.floor(dispBase / cantBase) : dispBase;
   const precioGsEquiv = moneda === "USD" ? (parseFloat(precio) || 0) * (tipoCambio || 0) : (parseFloat(precio) || 0);
-  const subtotal = (parseInt(cantidad, 10) || 0) * precioGsEquiv;
-  const ivaMonto = iva === "10%" ? subtotal * 0.10 : iva === "5%" ? subtotal * 0.05 : 0;
+  // IVA INCLUIDO (semantica del sistema, coherente con calcIva en /ventas/nueva):
+  // el precio que tipea el cajero YA incluye IVA. El monto IVA se EXTRAE del
+  // total, no se suma encima. Asi:
+  //   totalLinea = cantidad * precio   (IVA dentro)
+  //   ivaMonto   = totalLinea - totalLinea / 1.10   (la parte que es IVA)
+  //   subtotal   = totalLinea - ivaMonto             (base imponible)
+  const totalLinea = (parseInt(cantidad, 10) || 0) * precioGsEquiv;
+  const ivaMonto =
+    iva === "10%" ? totalLinea - totalLinea / 1.10
+    : iva === "5%" ? totalLinea - totalLinea / 1.05
+    : 0;
+  const subtotal = totalLinea - ivaMonto;
 
+  // Mobile: pt-3 (gana viewport vertical valioso, evita el modal "cortado")
+  // y pt-12 en sm+ donde si hay espacio para el aire decorativo.
   return (
-    <div className="fixed inset-0 z-[100] flex items-start justify-center bg-slate-900/60 backdrop-blur-sm pt-12 px-4" onClick={onClose}>
-      <div className="w-full max-w-6xl bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[88vh]" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[100] flex items-start justify-center bg-slate-900/60 backdrop-blur-sm pt-3 sm:pt-12 px-2 sm:px-4" onClick={onClose}>
+      {/* dvh (dynamic viewport height) en lugar de vh: en iOS Safari el vh
+          incluye el espacio del URL bar/safe-area y el modal queda parcialmente
+          oculto debajo del browser chrome. dvh devuelve el viewport REAL visible. */}
+      <div className="w-full max-w-6xl bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[94dvh] sm:max-h-[88vh]" onClick={(e) => e.stopPropagation()}>
         {/* Header con buscador */}
         <div className="p-4 border-b border-slate-200">
           <div className="flex items-center gap-3">
@@ -186,10 +319,17 @@ export default function ProductPickerModal({
           </p>
         </div>
 
-        {/* Body: lista + panel detalle */}
+        {/* Body: lista + panel detalle.
+            MASTER/DETAIL responsive:
+              MOBILE (< lg): lista full-width cuando NO hay seleccion; cuando seleccionas
+                             un producto, se oculta y aparece el panel detalle full-width
+                             (con boton "Volver" para cerrar la seleccion).
+              DESKTOP (>= lg): ambos lado a lado (60% / 40%).
+            Antes el panel detalle era "hidden lg:flex" -> en mobile NO se veia el form
+            para agregar el producto a la venta, por eso el usuario no podia cargar. */}
         <div className="flex flex-1 overflow-hidden">
           {/* LISTA */}
-          <div className="w-full lg:w-3/5 border-r border-slate-200 overflow-y-auto">
+          <div className={`${sel ? "hidden lg:block" : "block"} w-full lg:w-3/5 lg:border-r border-slate-200 overflow-y-auto`}>
             {loading && <div className="p-6 text-center text-sm text-slate-400">Buscando...</div>}
             {!loading && error && <div className="m-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>}
             {!loading && !error && items.length === 0 && (
@@ -202,18 +342,19 @@ export default function ProductPickerModal({
                 {items.map((p) => {
                   const enCarro = excludeIds.filter((id) => id === p.id).length;
                   const disp = p.stock_actual - enCarro;
-                  // Productos del Menú (controla_stock=false) no aplican validación de stock.
-                  const ctrlStock = p.controla_stock !== false;
-                  const sinStock = ctrlStock && disp <= 0;
-                  const isMenu = !ctrlStock;
+                  // Menú preparado_al_vender: sin stock propio (badge Menú).
+                  // Menú produccion_previa: maneja stock real del terminado → se muestra como reventa.
+                  const manejaStk = manejaStock(p);
+                  const sinStock = manejaStk && disp <= 0;
+                  const isMenu = !manejaStk;
                   const isSel = sel?.id === p.id;
                   return (
                     <li
                       key={p.id}
-                      onClick={() => !sinStock && selectProducto(p)}
-                      className={`flex items-center gap-3 px-4 py-3 transition-colors ${
-                        sinStock ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
-                      } ${isSel ? "bg-sky-50" : "hover:bg-slate-50"}`}
+                      onClick={() => selectProducto(p)}
+                      className={`flex items-center gap-3 px-4 py-3 transition-colors cursor-pointer ${
+                        isSel ? "bg-sky-50" : "hover:bg-slate-50"
+                      }`}
                     >
                       <div className="w-14 h-14 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden shrink-0">
                         {p.imagen_url ? (
@@ -253,15 +394,38 @@ export default function ProductPickerModal({
             )}
           </div>
 
-          {/* PANEL DETALLE */}
-          <div className="hidden lg:flex w-2/5 flex-col overflow-y-auto bg-slate-50">
+          {/* PANEL DETALLE
+              Layout flex column:
+                - Header sticky: boton Volver (mobile only).
+                - Middle scrollable: imagen + info + form inputs.
+                - Footer sticky: boton "+ Agregar a la venta" SIEMPRE visible.
+              Antes el boton estaba al final del scroll => en mobile chico el user
+              no llegaba a verlo, no podia confirmar el producto. */}
+          <div className={`${sel ? "flex" : "hidden lg:flex"} w-full lg:w-2/5 flex-col bg-slate-50 min-h-0`}>
             {!sel ? (
               <div className="flex-1 flex items-center justify-center text-sm text-slate-400 p-6 text-center">
                 Seleccioná un producto de la lista para ver detalle y agregar a la venta.
               </div>
             ) : (
-              <div className="p-5 space-y-4">
-                <div className="w-full h-44 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden">
+              <>
+                {/* Mobile back button — sticky en el tope del panel */}
+                <div className="lg:hidden shrink-0 border-b border-slate-200 bg-slate-50 px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => setSel(null)}
+                    className="inline-flex items-center gap-1.5 min-h-[40px] px-2 rounded-md text-sm font-medium text-slate-700 hover:bg-slate-200/60 hover:text-slate-900 transition-colors"
+                    aria-label="Volver a la lista de productos"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                      <path fillRule="evenodd" d="M12.78 5.22a.75.75 0 0 1 0 1.06L9.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
+                    </svg>
+                    Volver a la lista
+                  </button>
+                </div>
+                {/* Middle: scrollable. flex-1 + overflow-y-auto + min-h-0
+                    para que el footer no se aplaste. */}
+                <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3 sm:space-y-4 min-h-0">
+                <div className="w-full h-28 sm:h-44 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden">
                   {sel.imagen_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={sel.imagen_url} alt={sel.nombre} className="w-full h-full object-contain" />
@@ -282,8 +446,16 @@ export default function ProductPickerModal({
 
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <DetailItem label="Precio venta" value={formatGs(sel.precio_venta)} highlight />
-                  {sel.controla_stock !== false ? (
-                    <DetailItem label="Stock disp." value={`${dispSel} ${sel.unidad_medida}`} highlight />
+                  {manejaStock(sel) ? (
+                    <DetailItem
+                      label="Stock disp."
+                      value={
+                        presSel && presSel.cantidad_base !== 1
+                          ? `${dispSel} ${presSel.nombre} (= ${dispBase} ${sel.unidad_medida})`
+                          : `${dispSel} ${sel.unidad_medida}`
+                      }
+                      highlight
+                    />
                   ) : (
                     <DetailItem label="Tipo" value="Menú (preparado)" highlight />
                   )}
@@ -296,15 +468,92 @@ export default function ProductPickerModal({
                 )}
 
                 <div className="space-y-2 bg-white p-3 rounded-xl border border-slate-200">
+                  {/* Presentacion de venta. Solo aparece si hay >1 activa.
+                      Con 1 sola, la default se aplica silenciosamente. */}
+                  {presentaciones.length > 1 && (
+                    <div>
+                      <label className="block text-[11px] uppercase text-slate-400 mb-1">
+                        Presentación
+                      </label>
+                      <select
+                        value={presentacionId}
+                        onChange={(e) => handlePresentacionChange(e.target.value)}
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm bg-white"
+                      >
+                        {presentaciones.map((pp) => (
+                          <option key={pp.id} value={pp.id}>
+                            {pp.nombre}
+                            {pp.cantidad_base !== 1
+                              ? ` (= ${pp.cantidad_base} ${sel.unidad_medida})`
+                              : ""}
+                          </option>
+                        ))}
+                      </select>
+                      {presSel && presSel.cantidad_base !== 1 && (
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          1 {presSel.nombre} ={" "}
+                          <span className="font-semibold tabular-nums">
+                            {presSel.cantidad_base}
+                          </span>{" "}
+                          {sel.unidad_medida}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tipo de precio: al tocar, carga el precio correspondiente y recalcula. */}
+                  <div>
+                    <label className="block text-[11px] uppercase text-slate-400 mb-1">Tipo de precio</label>
+                    <div className="flex border border-slate-200 rounded-lg overflow-hidden">
+                      {(["minorista", "mayorista", "distribuidor"] as const).map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => handleTipoPrecio(t)}
+                          className={`flex-1 py-1.5 px-1 text-center transition-colors ${
+                            tipoPrecio === t ? "bg-[#0EA5E9] text-white" : "bg-white text-slate-600 hover:bg-slate-50"
+                          }`}
+                        >
+                          <span className="block text-xs font-medium">
+                            {t === "minorista" ? "Minorista" : t === "mayorista" ? "Mayorista" : "Distribuidor"}
+                          </span>
+                          <span className={`block text-[10px] tabular-nums ${tipoPrecio === t ? "text-white/90" : "text-slate-400"}`}>
+                            {/* El precio mostrado en cada boton es el de la
+                                presentacion actual (precio_tipo * cantidad_base),
+                                no el precio base del producto. Asi 'Mayorista'
+                                en una Caja=200 muestra Gs.8.000.000 (40k*200) en
+                                lugar de Gs.40.000 (base). Si la presentacion
+                                tiene override, mostramos el override fijo. */}
+                            {formatGs(
+                              presSel && presSel.precio_venta != null && presSel.precio_venta > 0
+                                ? presSel.precio_venta
+                                : precioPorTipoPicker(sel, t) * (presSel ? presSel.cantidad_base : 1)
+                            )}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-[11px] uppercase text-slate-400 mb-1">Cantidad</label>
+                      <label className="block text-[11px] uppercase text-slate-400 mb-1">
+                        Cantidad{presSel && presSel.nombre !== sel.unidad_medida ? ` (${presSel.nombre})` : ""}
+                      </label>
                       <input
                         type="number" min={1}
                         value={cantidad}
                         onChange={(e) => setCantidad(e.target.value)}
                         className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm"
                       />
+                      {presSel && presSel.cantidad_base !== 1 && (parseInt(cantidad, 10) || 0) > 0 && (
+                        <p className="mt-1 text-[11px] text-slate-500 tabular-nums">
+                          ={" "}
+                          <span className="font-semibold">
+                            {(parseInt(cantidad, 10) || 0) * presSel.cantidad_base}
+                          </span>{" "}
+                          {sel.unidad_medida}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-[11px] uppercase text-slate-400 mb-1">
@@ -340,18 +589,22 @@ export default function ProductPickerModal({
                   <div className="text-xs text-slate-500 space-y-0.5 pt-1">
                     <div className="flex justify-between"><span>Subtotal</span><span className="tabular-nums">{formatGs(subtotal)}</span></div>
                     <div className="flex justify-between"><span>IVA</span><span className="tabular-nums">{ivaMonto > 0 ? formatGs(ivaMonto) : "—"}</span></div>
-                    <div className="flex justify-between font-bold text-slate-800 pt-1 border-t border-slate-200"><span>Total línea</span><span className="tabular-nums">{formatGs(subtotal + ivaMonto)}</span></div>
+                    <div className="flex justify-between font-bold text-slate-800 pt-1 border-t border-slate-200"><span>Total línea</span><span className="tabular-nums">{formatGs(totalLinea)}</span></div>
                   </div>
-
+                </div>
+                </div>
+                {/* Footer sticky con el boton de accion principal.
+                    Siempre visible al final del panel, no requiere scroll. */}
+                <div className="shrink-0 border-t border-slate-200 bg-white p-3 sm:p-4">
                   <button
                     type="button"
                     onClick={handleAgregar}
-                    className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold py-2.5 rounded-lg"
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-sm font-semibold py-3 min-h-[48px] rounded-lg shadow-sm transition-colors"
                   >
                     + Agregar a la venta
                   </button>
                 </div>
-              </div>
+              </>
             )}
           </div>
         </div>

@@ -5,7 +5,9 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import EdgeScrollArea from "@/components/ui/EdgeScrollArea";
 import { FancySelect } from "@/components/ui/FancySelect";
+import MobileFab from "@/components/ui/MobileFab";
 import { getClientes, clienteNombre } from "@/lib/clientes/storage";
+import { productoMatchesQuery } from "@/lib/productos/token-search";
 import type { Cliente } from "@/lib/clientes/types";
 import { etiquetaVisibleTipoServicio, type ClienteTipoServicioRow } from "@/lib/clientes/tipo-servicio-catalogo";
 import { filasTiposDesdeSistemaEstatico, fetchTiposFormCliente } from "@/lib/clientes/fetch-tipos-servicio-form";
@@ -352,18 +354,10 @@ export default function ClientesPage() {
   }, [searchParams]);
 
   const filtrados = clientes.filter((c) => {
-    const nombre = clienteNombre(c).toLowerCase();
-    const q      = busqueda.toLowerCase();
-    if (q) {
-      const match =
-        nombre.includes(q) ||
-        (c.codigo_cliente ?? "").toLowerCase().includes(q) ||
-        (c.email          ?? "").toLowerCase().includes(q) ||
-        (c.telefono       ?? "").toLowerCase().includes(q) ||
-        (c.ruc            ?? "").toLowerCase().includes(q) ||
-        (c.ciudad         ?? "").toLowerCase().includes(q);
-      if (!match) return false;
-    }
+    if (busqueda.trim() && !productoMatchesQuery(
+      busqueda,
+      clienteNombre(c), c.codigo_cliente, c.email, c.telefono, c.ruc, c.ciudad
+    )) return false;
     if (filtroEstado       && c.estado              !== filtroEstado) return false;
     if (filtroOrigen       && c.origen              !== filtroOrigen) return false;
     if (filtroTipo         && c.tipo_cliente        !== filtroTipo) return false;
@@ -611,6 +605,7 @@ export default function ClientesPage() {
         )}
       </div>
 
+      <MobileFab href="/clientes/nuevo" label="Nuevo cliente" />
     </div>
   );
 }

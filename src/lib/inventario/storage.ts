@@ -16,6 +16,9 @@ interface ProductoRow {
   sku: string;
   costo_promedio: number;
   precio_venta: number;
+  precio_mayorista?: number | string | null;
+  cantidad_minima_mayorista?: number | string | null;
+  precio_distribuidor?: number | string | null;
   stock_actual: number;
   stock_minimo: number;
   unidad_medida: string;
@@ -33,12 +36,19 @@ interface ProductoRow {
   es_vendible?: boolean | null;
   es_insumo?: boolean | null;
   controla_stock?: boolean | null;
+  destacado?: boolean | null;
+  oferta_semana_destacada?: boolean | null;
+  discount_type?: string | null;
+  discount_value?: number | string | null;
+  discount_starts_at?: string | null;
+  discount_ends_at?: string | null;
   valorizado?: boolean | null;
   unidad_compra?: string | null;
   unidad_receta?: string | null;
   factor_compra_receta?: string | number | null;
   tiempo_prep_minutos?: number | null;
   descripcion?: string | null;
+  modo_receta?: string | null;
 }
 
 interface MovimientoRow {
@@ -68,6 +78,9 @@ function rowToProducto(row: ProductoRow): Producto {
     sku: row.sku,
     costo_promedio: Number(row.costo_promedio),
     precio_venta: Number(row.precio_venta),
+    precio_mayorista: row.precio_mayorista != null ? Number(row.precio_mayorista) : null,
+    cantidad_minima_mayorista: row.cantidad_minima_mayorista != null ? Number(row.cantidad_minima_mayorista) : null,
+    precio_distribuidor: row.precio_distribuidor != null ? Number(row.precio_distribuidor) : null,
     stock_actual: Number(row.stock_actual),
     stock_minimo: Number(row.stock_minimo),
     unidad_medida: row.unidad_medida,
@@ -82,12 +95,22 @@ function rowToProducto(row: ProductoRow): Producto {
     es_vendible: row.es_vendible ?? true,
     es_insumo: row.es_insumo ?? false,
     controla_stock: row.controla_stock ?? true,
+    destacado: row.destacado ?? false,
+    oferta_semana_destacada: row.oferta_semana_destacada ?? false,
+    discount_type:
+      row.discount_type === "percentage" || row.discount_type === "fixed"
+        ? row.discount_type
+        : null,
+    discount_value: row.discount_value != null ? Number(row.discount_value) : 0,
+    discount_starts_at: row.discount_starts_at ?? null,
+    discount_ends_at: row.discount_ends_at ?? null,
     valorizado: row.valorizado ?? true,
     unidad_compra: row.unidad_compra ?? null,
     unidad_receta: row.unidad_receta ?? null,
     factor_compra_receta: row.factor_compra_receta != null ? Number(row.factor_compra_receta) : 1,
     tiempo_prep_minutos: row.tiempo_prep_minutos != null ? Number(row.tiempo_prep_minutos) : 0,
     descripcion: row.descripcion ?? null,
+    modo_receta: row.modo_receta ?? "preparado_al_vender",
   };
 }
 
@@ -124,6 +147,52 @@ export async function getProductos(): Promise<Producto[]> {
   } catch (err) {
     console.error("[inventario] getProductos:", err instanceof Error ? err.message : err);
     return [];
+  }
+}
+
+export interface ProductosPaginadosOpts {
+  page?: number;
+  pageSize?: number;
+  q?: string;
+  /** uuid de categoria | "__sin__" para los que no tienen categoria asignada | "" para todas */
+  categoria?: string;
+}
+export interface ProductosPaginadosResult {
+  productos: Producto[];
+  total: number;
+}
+
+/**
+ * Lista paginada de productos con filtros server-side (busqueda y categoria).
+ * Usado por la pantalla principal de inventario.
+ */
+export async function getProductosPaginated(
+  opts: ProductosPaginadosOpts = {}
+): Promise<ProductosPaginadosResult> {
+  const page = Math.max(1, opts.page ?? 1);
+  const pageSize = Math.max(1, Math.min(500, opts.pageSize ?? 25));
+  const offset = (page - 1) * pageSize;
+  const params = new URLSearchParams();
+  params.set("limit", String(pageSize));
+  params.set("offset", String(offset));
+  if (opts.q && opts.q.trim()) params.set("q", opts.q.trim());
+  if (opts.categoria) params.set("categoria", opts.categoria);
+  try {
+    const r = await fetch(`/api/productos?${params.toString()}`, {
+      credentials: "include",
+      cache: "no-store",
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j?.success) {
+      console.error("[inventario] getProductosPaginated:", (j as { error?: string })?.error ?? r.status);
+      return { productos: [], total: 0 };
+    }
+    const data = j.data as { productos?: ProductoRow[]; total?: number };
+    const list = (data.productos ?? []) as ProductoRow[];
+    return { productos: list.map(rowToProducto), total: Number(data.total) || 0 };
+  } catch (err) {
+    console.error("[inventario] getProductosPaginated:", err instanceof Error ? err.message : err);
+    return { productos: [], total: 0 };
   }
 }
 
@@ -186,6 +255,9 @@ export async function saveProducto(
     sku: datos.sku,
     costo_promedio: datos.costo_promedio,
     precio_venta: datos.precio_venta,
+    precio_mayorista: datos.precio_mayorista ?? null,
+    cantidad_minima_mayorista: datos.cantidad_minima_mayorista ?? null,
+    precio_distribuidor: datos.precio_distribuidor ?? null,
     stock_actual: datos.stock_actual ?? 0,
     stock_minimo: datos.stock_minimo ?? 0,
     unidad_medida: datos.unidad_medida || "Unidad",
@@ -201,6 +273,17 @@ export async function saveProducto(
     es_vendible: typeof datos.es_vendible === "boolean" ? datos.es_vendible : true,
     es_insumo: typeof datos.es_insumo === "boolean" ? datos.es_insumo : false,
     controla_stock: typeof datos.controla_stock === "boolean" ? datos.controla_stock : true,
+    destacado: typeof datos.destacado === "boolean" ? datos.destacado : false,
+    discount_type:
+      datos.discount_type === "percentage" || datos.discount_type === "fixed"
+        ? datos.discount_type
+        : null,
+    discount_value:
+      typeof datos.discount_value === "number" && datos.discount_value >= 0
+        ? datos.discount_value
+        : 0,
+    discount_starts_at: datos.discount_starts_at ?? null,
+    discount_ends_at: datos.discount_ends_at ?? null,
     valorizado: typeof datos.valorizado === "boolean" ? datos.valorizado : true,
     unidad_compra: datos.unidad_compra ?? null,
     unidad_receta: datos.unidad_receta ?? null,
@@ -253,6 +336,9 @@ export async function updateProducto(
   if (datos.sku !== undefined) body.sku = datos.sku;
   if (datos.costo_promedio !== undefined) body.costo_promedio = datos.costo_promedio;
   if (datos.precio_venta !== undefined) body.precio_venta = datos.precio_venta;
+  if (datos.precio_mayorista !== undefined) body.precio_mayorista = datos.precio_mayorista ?? null;
+  if (datos.cantidad_minima_mayorista !== undefined) body.cantidad_minima_mayorista = datos.cantidad_minima_mayorista ?? null;
+  if (datos.precio_distribuidor !== undefined) body.precio_distribuidor = datos.precio_distribuidor ?? null;
   if (datos.stock_actual !== undefined) body.stock_actual = datos.stock_actual;
   if (datos.stock_minimo !== undefined) body.stock_minimo = datos.stock_minimo;
   if (datos.unidad_medida !== undefined) body.unidad_medida = datos.unidad_medida;
@@ -267,6 +353,20 @@ export async function updateProducto(
   if (typeof datos.es_vendible === "boolean") body.es_vendible = datos.es_vendible;
   if (typeof datos.es_insumo === "boolean") body.es_insumo = datos.es_insumo;
   if (typeof datos.controla_stock === "boolean") body.controla_stock = datos.controla_stock;
+  if (typeof datos.destacado === "boolean") body.destacado = datos.destacado;
+  if (typeof datos.oferta_semana_destacada === "boolean") body.oferta_semana_destacada = datos.oferta_semana_destacada;
+  if (datos.discount_type !== undefined) {
+    body.discount_type =
+      datos.discount_type === "percentage" || datos.discount_type === "fixed"
+        ? datos.discount_type
+        : null;
+  }
+  if (datos.discount_value !== undefined)
+    body.discount_value = datos.discount_value ?? 0;
+  if (datos.discount_starts_at !== undefined)
+    body.discount_starts_at = datos.discount_starts_at ?? null;
+  if (datos.discount_ends_at !== undefined)
+    body.discount_ends_at = datos.discount_ends_at ?? null;
   if (typeof datos.valorizado === "boolean") body.valorizado = datos.valorizado;
   if (datos.unidad_compra !== undefined) body.unidad_compra = datos.unidad_compra ?? null;
   if (datos.unidad_receta !== undefined) body.unidad_receta = datos.unidad_receta ?? null;
@@ -275,6 +375,7 @@ export async function updateProducto(
   if (typeof datos.tiempo_prep_minutos === "number" && datos.tiempo_prep_minutos >= 0)
     body.tiempo_prep_minutos = datos.tiempo_prep_minutos;
   if (datos.descripcion !== undefined) body.descripcion = datos.descripcion;
+  if (datos.modo_receta !== undefined) body.modo_receta = datos.modo_receta;
 
   const res = await fetch(`/api/productos/${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -311,6 +412,58 @@ export async function getMovimientos(): Promise<MovimientoInventario[]> {
   } catch (err) {
     console.error("[inventario] getMovimientos:", err instanceof Error ? err.message : err);
     return [];
+  }
+}
+
+export interface MovimientosPaginadosOpts {
+  page?: number;
+  pageSize?: number;
+  q?: string;
+  tipo?: string;     // ENTRADA | SALIDA | AJUSTE
+  origen?: string;   // compra | venta | ajuste_manual | inventario_inicial
+  fechaDesde?: string;  // YYYY-MM-DD
+  fechaHasta?: string;  // YYYY-MM-DD
+}
+export interface MovimientosPaginadosResult {
+  movimientos: MovimientoInventario[];
+  total: number;
+}
+
+/**
+ * Lista movimientos paginados con filtros server-side. Mismo modelo que
+ * getProductosPaginated. El total viene de count: "planned" (estimacion
+ * rapida via pg_stats).
+ */
+export async function getMovimientosPaginated(
+  opts: MovimientosPaginadosOpts = {}
+): Promise<MovimientosPaginadosResult> {
+  const page = Math.max(1, opts.page ?? 1);
+  const pageSize = Math.max(1, Math.min(200, opts.pageSize ?? 25));
+  const offset = (page - 1) * pageSize;
+  const params = new URLSearchParams();
+  params.set("limit", String(pageSize));
+  params.set("offset", String(offset));
+  if (opts.q && opts.q.trim()) params.set("q", opts.q.trim());
+  if (opts.tipo) params.set("tipo", opts.tipo);
+  if (opts.origen) params.set("origen", opts.origen);
+  if (opts.fechaDesde) params.set("fecha_desde", opts.fechaDesde);
+  if (opts.fechaHasta) params.set("fecha_hasta", opts.fechaHasta);
+  try {
+    const r = await fetch(`/api/inventario/movimientos?${params.toString()}`, {
+      credentials: "include",
+      cache: "no-store",
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j?.success) {
+      console.error("[inventario] getMovimientosPaginated:", (j as { error?: string })?.error ?? r.status);
+      return { movimientos: [], total: 0 };
+    }
+    const data = j.data as { movimientos?: MovimientoRow[]; total?: number };
+    const list = (data.movimientos ?? []) as MovimientoRow[];
+    return { movimientos: list.map(rowToMovimiento), total: Number(data.total) || 0 };
+  } catch (err) {
+    console.error("[inventario] getMovimientosPaginated:", err instanceof Error ? err.message : err);
+    return { movimientos: [], total: 0 };
   }
 }
 

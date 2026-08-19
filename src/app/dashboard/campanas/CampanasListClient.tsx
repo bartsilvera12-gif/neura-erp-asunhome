@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
+import { fetchWithSupabaseSession, isAbortError } from "@/lib/api/fetch-with-supabase-session";
 
 type CampaignRow = {
   id: string;
@@ -25,26 +25,37 @@ export default function CampanasListClient() {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    // Upgrade del flag `cancelled` a AbortController: ahora la peticion HTTP
+    // se aborta de verdad (libera socket, bytecode JSON) en vez de solo
+    // ignorar el setState. Importa cuando el user navega rapido entre paginas.
+    const ctrl = new AbortController();
     (async () => {
-      const res = await fetchWithSupabaseSession("/api/campanas", { cache: "no-store" });
-      const json = (await res.json().catch(() => ({}))) as {
-        success?: boolean;
-        data?: CampaignRow[];
-        error?: string;
-      };
-      if (cancelled) return;
-      if (!res.ok || !json.success) {
-        setErr(json.error ?? "No se pudo cargar");
+      try {
+        const res = await fetchWithSupabaseSession("/api/campanas", {
+          cache: "no-store",
+          signal: ctrl.signal,
+        });
+        if (ctrl.signal.aborted) return;
+        const json = (await res.json().catch(() => ({}))) as {
+          success?: boolean;
+          data?: CampaignRow[];
+          error?: string;
+        };
+        if (ctrl.signal.aborted) return;
+        if (!res.ok || !json.success) {
+          setErr(json.error ?? "No se pudo cargar");
+          setLoading(false);
+          return;
+        }
+        setRows(json.data ?? []);
         setLoading(false);
-        return;
+      } catch (e) {
+        if (isAbortError(e)) return;
+        setErr(e instanceof Error ? e.message : "No se pudo cargar");
+        setLoading(false);
       }
-      setRows(json.data ?? []);
-      setLoading(false);
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => ctrl.abort();
   }, []);
 
   if (loading) {

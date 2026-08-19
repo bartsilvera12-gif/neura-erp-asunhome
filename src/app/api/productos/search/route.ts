@@ -3,6 +3,7 @@ import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
 import { signProductoImagen } from "@/lib/inventario/imagen-storage";
+import { applyTokenSearch } from "@/lib/productos/token-search";
 
 interface ProductoSearchHit {
   id: string;
@@ -11,6 +12,8 @@ interface ProductoSearchHit {
   codigo_barras: string | null;
   codigo_barras_interno: boolean;
   precio_venta: number;
+  precio_mayorista: number;
+  precio_distribuidor: number | null;
   costo_promedio: number;
   stock_actual: number;
   stock_minimo: number;
@@ -24,21 +27,23 @@ interface ProductoSearchHit {
   ubicacion_tipo: string | null;
   es_vendible: boolean;
   controla_stock: boolean;
+  modo_receta: string;
+  // Descuento promocional (oferta)
+  discount_type: "percentage" | "fixed" | null;
+  discount_value: number | null;
+  discount_starts_at: string | null;
+  discount_ends_at: string | null;
 }
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
 
-/** Escape pattern para ILIKE evitando interpretación de % y _ del usuario. */
-function escapeIlikePattern(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
-}
-
 /**
  * GET /api/productos/search?q=...&limit=30
  *
- * Búsqueda case-insensitive en nombre/sku/codigo_barras vía PostgREST
- * (compatible Hostinger sin pool PG). Filtra a vendibles únicamente.
+ * Búsqueda por TOKENS (palabras clave en cualquier orden) case-insensitive en
+ * nombre/sku/codigo_barras vía PostgREST (compatible Hostinger sin pool PG).
+ * Filtra a vendibles únicamente.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -56,22 +61,39 @@ export async function GET(request: NextRequest) {
       Math.min(MAX_LIMIT, Number.isFinite(limitParam) ? limitParam : DEFAULT_LIMIT)
     );
 
+    const conDescuento = url.searchParams.get("con_descuento") === "1";
+    const categoriaId = (url.searchParams.get("categoria_id") ?? "").trim() || null;
+
     let query = supabase
       .from("productos")
       .select(
         "id, nombre, sku, codigo_barras, codigo_barras_interno, " +
-          "precio_venta, costo_promedio, stock_actual, stock_minimo, " +
+          "precio_venta, precio_mayorista, precio_distribuidor, costo_promedio, stock_actual, stock_minimo, " +
           "unidad_medida, metodo_valuacion, imagen_path, imagen_url, " +
           "categoria_principal_id, proveedor_principal_id, ubicacion_principal_id, " +
-          "es_vendible, controla_stock, activo"
+          "es_vendible, controla_stock, modo_receta, activo, " +
+          "discount_type, discount_value, discount_starts_at, discount_ends_at"
       )
       .eq("empresa_id", empresaId)
       .eq("activo", true)
       .eq("es_vendible", true);
 
+    // Filtro opcional para el picker de 'Ofertas del home': solo productos
+    // con descuento promocional configurado (tipo + valor > 0). No exige
+    // que la ventana temporal este activa AHORA — alcanza con que el
+    // descuento exista; la ventana se evalua en render.
+    if (conDescuento) {
+      query = query.not("discount_type", "is", null).gt("discount_value", 0);
+    }
+
     if (q.length > 0) {
-      const pat = `%${escapeIlikePattern(q)}%`;
-      query = query.or(`nombre.ilike.${pat},sku.ilike.${pat},codigo_barras.ilike.${pat}`);
+      // Cada palabra debe aparecer en nombre/sku/codigo_barras (AND entre
+      // tokens, OR entre columnas) → matching orden-independiente.
+      query = applyTokenSearch(query, q, ["nombre", "sku", "codigo_barras"]);
+    }
+
+    if (categoriaId) {
+      query = query.eq("categoria_principal_id", categoriaId);
     }
 
     query = query.order("nombre").limit(limit);
@@ -87,6 +109,8 @@ export async function GET(request: NextRequest) {
       codigo_barras: (r.codigo_barras as string | null) ?? null,
       codigo_barras_interno: r.codigo_barras_interno === true,
       precio_venta: Number(r.precio_venta ?? 0),
+      precio_mayorista: Number(r.precio_mayorista ?? 0),
+      precio_distribuidor: r.precio_distribuidor != null ? Number(r.precio_distribuidor) : null,
       costo_promedio: Number(r.costo_promedio ?? 0),
       stock_actual: Number(r.stock_actual ?? 0),
       stock_minimo: Number(r.stock_minimo ?? 0),
@@ -96,6 +120,14 @@ export async function GET(request: NextRequest) {
       imagen_url: (r.imagen_url as string | null) ?? null,
       es_vendible: r.es_vendible !== false,
       controla_stock: r.controla_stock !== false,
+      modo_receta: typeof r.modo_receta === "string" ? r.modo_receta : "preparado_al_vender",
+      discount_type:
+        r.discount_type === "percentage" || r.discount_type === "fixed"
+          ? (r.discount_type as "percentage" | "fixed")
+          : null,
+      discount_value: r.discount_value != null ? Number(r.discount_value) : null,
+      discount_starts_at: (r.discount_starts_at as string | null) ?? null,
+      discount_ends_at: (r.discount_ends_at as string | null) ?? null,
     }));
 
     // Firmar URLs solo para los primeros 20 visibles (optimización).
@@ -113,6 +145,8 @@ export async function GET(request: NextRequest) {
       codigo_barras: r.codigo_barras,
       codigo_barras_interno: r.codigo_barras_interno,
       precio_venta: r.precio_venta,
+      precio_mayorista: r.precio_mayorista,
+      precio_distribuidor: r.precio_distribuidor,
       costo_promedio: r.costo_promedio,
       stock_actual: r.stock_actual,
       stock_minimo: r.stock_minimo,
@@ -126,6 +160,11 @@ export async function GET(request: NextRequest) {
       ubicacion_tipo: null,
       es_vendible: r.es_vendible,
       controla_stock: r.controla_stock,
+      modo_receta: r.modo_receta,
+      discount_type: r.discount_type,
+      discount_value: r.discount_value,
+      discount_starts_at: r.discount_starts_at,
+      discount_ends_at: r.discount_ends_at,
     }));
 
     return NextResponse.json(successResponse({ items: hits, count: hits.length, q }));

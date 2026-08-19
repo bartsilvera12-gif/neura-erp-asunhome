@@ -13,6 +13,8 @@ export type Gasto = {
   recurrente: boolean;
   frecuencia?: string;
   fecha: string;
+  descuenta_caja: boolean;
+  caja_movimiento_id: string | null;
   created_at: string;
 };
 
@@ -24,6 +26,7 @@ export type GastoInput = {
   recurrente: boolean;
   frecuencia?: string;
   fecha: string;
+  descuenta_caja?: boolean;
 };
 
 function mapRow(r: Record<string, unknown>): Gasto {
@@ -37,6 +40,8 @@ function mapRow(r: Record<string, unknown>): Gasto {
     recurrente: Boolean(r.recurrente),
     frecuencia: r.frecuencia as string | undefined,
     fecha: (r.fecha as string) ?? "",
+    descuenta_caja: Boolean(r.descuenta_caja),
+    caja_movimiento_id: (r.caja_movimiento_id as string | null) ?? null,
     created_at: (r.created_at as string) ?? "",
   };
 }
@@ -84,9 +89,27 @@ export async function getGastosMesActual(): Promise<Gasto[]> {
 export async function createGasto(input: GastoInput): Promise<Gasto> {
   if (input.monto <= 0) throw new Error("El monto debe ser mayor a 0");
 
+  if (typeof window !== "undefined") {
+    // Browser: usar API server-side (resuelve schema y empresa via auth cookie).
+    const res = await fetchWithSupabaseSession("/api/gastos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      success?: boolean;
+      data?: Record<string, unknown>;
+      error?: string;
+    };
+    if (!res.ok || !json.success || !json.data) {
+      throw new Error(json.error ?? `Error ${res.status}`);
+    }
+    return mapRow(json.data);
+  }
+
+  // Server-side (SSR/server actions): DB directo
   const supabase = await getBrowserSupabaseForEmpresaData();
   const empresa_id = await getEmpresaId();
-
   const { data, error } = await supabase
     .from("gastos")
     .insert({

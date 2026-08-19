@@ -102,18 +102,24 @@ export default function UsuariosPage() {
         <span className="font-semibold text-gray-700">{usuarios.length}</span> usuarios
       </p>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm ring-1 ring-[#4FAEB2]/15 overflow-hidden">
+      {/* overflow-x-auto en el wrapper en lugar de overflow-hidden:
+          - mobile: tabla con min-w-[820px] activa scroll horizontal real.
+          - Teléfono se oculta en pantallas chicas (ya esta en el bloque del usuario debajo del nombre).
+          - Acciones con min-h-[40px] para tap target.
+      */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm ring-1 ring-[#4FAEB2]/15 overflow-x-auto">
         {filtrados.length === 0 ? (
           <div className="py-16 text-center text-sm text-gray-400">No hay usuarios.</div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[820px] sm:min-w-0 text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {["Usuario", "Email", "Teléfono", "Rol", "Estado", "Acciones"].map((h) => (
-                  <th key={h} className="text-left text-xs font-semibold text-gray-500 px-4 py-3 uppercase tracking-wide">
-                    {h}
-                  </th>
-                ))}
+                <th className="text-left text-xs font-semibold text-gray-500 px-4 py-3 uppercase tracking-wide">Usuario</th>
+                <th className="text-left text-xs font-semibold text-gray-500 px-4 py-3 uppercase tracking-wide">Email</th>
+                <th className="text-left text-xs font-semibold text-gray-500 px-4 py-3 uppercase tracking-wide hidden md:table-cell">Teléfono</th>
+                <th className="text-left text-xs font-semibold text-gray-500 px-4 py-3 uppercase tracking-wide">Rol</th>
+                <th className="text-left text-xs font-semibold text-gray-500 px-4 py-3 uppercase tracking-wide hidden md:table-cell">Estado</th>
+                <th className="text-left text-xs font-semibold text-gray-500 px-4 py-3 uppercase tracking-wide">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
@@ -133,11 +139,11 @@ export default function UsuariosPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600 truncate max-w-[180px]">{usr.email}</td>
-                  <td className="px-4 py-3 text-gray-600">{usr.telefono ?? "—"}</td>
+                  <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{usr.telefono ?? "—"}</td>
                   <td className="px-4 py-3">
                     <span className="text-xs font-medium text-gray-600 capitalize">{usr.rol ?? "—"}</span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 hidden md:table-cell">
                     <span
                       className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${
                         usr.estado === "activo" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
@@ -151,18 +157,18 @@ export default function UsuariosPage() {
                       <Link
                         href={`/usuarios/${usr.id}`}
                         title="Ver usuario"
-                        className="inline-flex justify-center w-7 h-7 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                        className="inline-flex items-center justify-center min-w-[40px] min-h-[40px] rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
                           <path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
                         </svg>
                       </Link>
                       <Link
                         href={`/usuarios/${usr.id}?edit=1`}
                         title="Editar usuario"
-                        className="inline-flex justify-center w-7 h-7 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                        className="inline-flex items-center justify-center min-w-[40px] min-h-[40px] rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
                           <path d="M2.695 14.763l-1.262 3.154a.5.5 0 0 0 .65.65l3.155-1.262a4 4 0 0 0 1.343-.885L17.5 5.5a2.121 2.121 0 0 0-3-3L3.58 13.42a4 4 0 0 0-.885 1.343Z" />
                         </svg>
                       </Link>

@@ -33,6 +33,8 @@ export default function GastosPage() {
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [cargando, setCargando] = useState(true);
   const [eliminando, setEliminando] = useState<string | null>(null);
+  const [confirmarEliminar, setConfirmarEliminar] = useState<Gasto | null>(null);
+  const [errorEliminar, setErrorEliminar] = useState<string | null>(null);
 
   useEffect(() => {
     getGastos()
@@ -41,14 +43,17 @@ export default function GastosPage() {
       .finally(() => setCargando(false));
   }, []);
 
-  async function handleEliminar(g: Gasto) {
-    if (!confirm(`¿Eliminar el gasto "${g.descripcion || g.categoria || "sin descripción"}"?`)) return;
+  async function confirmarYEliminar() {
+    if (!confirmarEliminar) return;
+    const g = confirmarEliminar;
     setEliminando(g.id);
+    setErrorEliminar(null);
     try {
       await deleteGasto(g.id);
       setGastos((prev) => prev.filter((x) => x.id !== g.id));
-    } catch {
-      setEliminando(null);
+      setConfirmarEliminar(null);
+    } catch (err) {
+      setErrorEliminar(err instanceof Error ? err.message : "No se pudo eliminar el gasto.");
     } finally {
       setEliminando(null);
     }
@@ -95,14 +100,17 @@ export default function GastosPage() {
             </Link>
           </div>
         ) : (
-          <table className="w-full">
+          /* overflow-x-auto + min-w fuerza scroll horizontal en mobile;
+              Categoria + Tipo se ocultan en pantallas chicas. */
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] sm:min-w-0">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
                 <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Fecha</th>
-                <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Categoría</th>
+                <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3 hidden md:table-cell">Categoría</th>
                 <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Descripción</th>
                 <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Monto</th>
-                <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Tipo</th>
+                <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3 hidden md:table-cell">Tipo</th>
                 <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Acciones</th>
               </tr>
             </thead>
@@ -110,14 +118,14 @@ export default function GastosPage() {
               {gastos.map((g) => (
                 <tr key={g.id} className="hover:bg-[#4FAEB2]/[0.04] transition-colors">
                   <td className="px-5 py-3.5 text-sm text-gray-600">{formatFecha(g.fecha)}</td>
-                  <td className="px-5 py-3.5 text-sm font-medium text-gray-800">{g.categoria || "—"}</td>
+                  <td className="px-5 py-3.5 text-sm font-medium text-gray-800 hidden md:table-cell">{g.categoria || "—"}</td>
                   <td className="px-5 py-3.5 text-sm text-gray-600 max-w-[200px] truncate">
                     {g.descripcion || "—"}
                   </td>
                   <td className="px-5 py-3.5 text-sm font-semibold text-gray-800 tabular-nums">
                     {formatGs(g.monto)}
                   </td>
-                  <td className="px-5 py-3.5">
+                  <td className="px-5 py-3.5 hidden md:table-cell">
                     <span
                       className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${tipoBadge[g.tipo] ?? "bg-slate-100"}`}
                     >
@@ -128,15 +136,15 @@ export default function GastosPage() {
                     <div className="flex gap-2">
                       <Link
                         href={`/gastos/${g.id}/editar`}
-                        className="text-xs text-gray-500 hover:text-gray-800 underline"
+                        className="inline-flex items-center min-h-[40px] text-xs text-gray-500 hover:text-gray-800 underline"
                       >
                         Editar
                       </Link>
                       <button
                         type="button"
-                        onClick={() => handleEliminar(g)}
+                        onClick={() => { setConfirmarEliminar(g); setErrorEliminar(null); }}
                         disabled={eliminando === g.id}
-                        className="text-xs text-red-500 hover:text-red-700 underline disabled:opacity-50"
+                        className="inline-flex items-center min-h-[40px] text-xs text-red-500 hover:text-red-700 underline disabled:opacity-50"
                       >
                         {eliminando === g.id ? "…" : "Eliminar"}
                       </button>
@@ -146,6 +154,7 @@ export default function GastosPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -153,6 +162,56 @@ export default function GastosPage() {
         <p className="text-sm text-gray-500">
           <span className="font-semibold text-gray-800">{gastos.length}</span> gastos
         </p>
+      )}
+
+      {confirmarEliminar && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+          onClick={() => (eliminando ? null : setConfirmarEliminar(null))}
+        >
+          <div
+            className="w-full max-w-md overflow-hidden rounded-2xl border-2 border-red-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b border-red-100 bg-red-50/60 px-5 py-4">
+              <h3 className="text-base font-bold text-red-800">Eliminar gasto</h3>
+              <p className="mt-1 text-xs text-red-700">
+                ¿Estás seguro de eliminar el gasto{" "}
+                <strong>
+                  &quot;{confirmarEliminar.descripcion || confirmarEliminar.categoria || "sin descripción"}&quot;
+                </strong>
+                {" "}por{" "}
+                <strong>Gs. {Math.round(confirmarEliminar.monto).toLocaleString("es-PY")}</strong>?
+                Esta acción no se puede deshacer.
+              </p>
+            </div>
+            <div className="p-5 space-y-3">
+              {errorEliminar && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {errorEliminar}
+                </div>
+              )}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmarEliminar(null)}
+                  disabled={!!eliminando}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmarYEliminar}
+                  disabled={!!eliminando}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {eliminando ? "Eliminando..." : "Eliminar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 import { ChefHat, ArrowLeft, Loader2 } from "lucide-react";
+import { NEURA_CLIENT_SCHEMA } from "@/lib/supabase/schema";
+
+/** Reserva monocliente: la receta pertenece al producto; el nombre se autogenera. */
+const RECETA_SIMPLE = NEURA_CLIENT_SCHEMA === "reservacaacupe";
 
 type Producto = {
   id: string;
@@ -107,9 +111,28 @@ export default function NuevaRecetaPage() {
       )}
 
       {!loading && productos.length === 0 && (
-        <div className="rounded-md border border-dashed border-gray-300 p-6 text-sm text-gray-500">
-          No quedan productos vendibles sin receta. Marcá un producto como vendible
-          (<code>es_vendible=true</code>) o eliminá una receta existente para liberar el producto.
+        <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-6 text-center">
+          <ChefHat className="mx-auto h-8 w-8 text-gray-300" />
+          <p className="mt-3 text-sm font-medium text-gray-700">
+            Todos los productos del Menú ya tienen una receta.
+          </p>
+          <p className="mt-1 text-sm text-gray-500">
+            Para crear una nueva receta, primero creá un producto de tipo Menú sin receta, o editá una receta existente.
+          </p>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <Link
+              href="/inventario/nuevo"
+              className="inline-flex items-center rounded-lg bg-[#4FAEB2] px-4 py-2 text-sm font-medium text-white hover:bg-[#3F8E91] transition-colors"
+            >
+              Ir a Inventario
+            </Link>
+            <Link
+              href="/dashboard/recetas"
+              className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              Ver recetas existentes
+            </Link>
+          </div>
         </div>
       )}
 
@@ -117,7 +140,7 @@ export default function NuevaRecetaPage() {
         <form onSubmit={handleSubmit} className="space-y-4 bg-white p-6 rounded-md border border-gray-200">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Producto vendible <span className="text-red-500">*</span>
+              Producto del menú <span className="text-red-500">*</span>
             </label>
             <select
               value={productoId}
@@ -131,12 +154,16 @@ export default function NuevaRecetaPage() {
             >
               {productos.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.nombre} ({p.sku}) — Gs. {Number(p.precio_venta).toLocaleString("es-PY")}
+                  {p.nombre} ({p.sku})
                 </option>
               ))}
             </select>
+            <p className="mt-1 text-[11px] text-gray-400">
+              Solo productos elaborados / de menú. Los de reventa y la materia prima no llevan receta.
+            </p>
           </div>
 
+          {!RECETA_SIMPLE && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Nombre (opcional, override)
@@ -149,6 +176,7 @@ export default function NuevaRecetaPage() {
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
             />
           </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>

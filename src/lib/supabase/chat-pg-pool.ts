@@ -103,7 +103,11 @@ export function getChatPostgresPool(): pg.Pool | null {
       connectionString: url,
       max,
       idleTimeoutMillis: 20_000,
-      connectionTimeoutMillis: 12_000,
+      // Fail-fast: si el pooler/DB directo no responde, fallar en 4s en vez de
+      // colgar 12s y recién ahí devolver 500. Reduce el daño cuando la conexión
+      // PG directa está caída/lenta en prod (ver Pedidos/prioridades y Sorteos).
+      // Mitigación — la causa raíz es de infra (conectividad al pooler).
+      connectionTimeoutMillis: 4_000,
       allowExitOnIdle: true,
       ssl: url.includes("supabase") ? { rejectUnauthorized: false } : undefined,
     });

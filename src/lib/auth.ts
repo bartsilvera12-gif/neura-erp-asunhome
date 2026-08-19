@@ -2,6 +2,7 @@ import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session"
 import { serializeUnknownError } from "@/lib/errors/serialize-unknown-error";
 import { clearBrowserEmpresaDataSchemaCache } from "@/lib/supabase/browser-data-client";
 import { usuarioEmailLookupVariants } from "@/lib/auth/usuario-email-variants";
+import { clearModuleAccessCache } from "@/lib/modulos/module-access-cache";
 import { supabase } from "./supabase";
 
 /** Fila mínima de zentra_erp.usuarios usada en el cliente. */
@@ -20,11 +21,16 @@ export type CurrentUsuario = {
 
 export async function signIn(email: string, password: string) {
   clearBrowserEmpresaDataSchemaCache();
+  // Borrar cache del usuario anterior si quedó residual en localStorage —
+  // evita que el Sidebar muestre brevemente los módulos del usuario previo
+  // antes de que el SIGNED_IN haga refresh.
+  clearModuleAccessCache();
   return supabase.auth.signInWithPassword({ email, password });
 }
 
 export async function signOut() {
   clearBrowserEmpresaDataSchemaCache();
+  clearModuleAccessCache();
   return supabase.auth.signOut();
 }
 

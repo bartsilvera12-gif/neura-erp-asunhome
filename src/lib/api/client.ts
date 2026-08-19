@@ -78,6 +78,9 @@ export async function apiCreateCliente(data: {
   nombre_contacto: string;
   ruc?: string;
   documento?: string;
+  nombre_facturacion?: string | null;
+  nivel_precio?: "minorista" | "mayorista" | "distribuidor";
+  es_contribuyente?: boolean;
   telefono?: string;
   email?: string;
   direccion?: string;
@@ -86,6 +89,7 @@ export async function apiCreateCliente(data: {
   condicion_pago?: string;
   moneda_preferida?: string;
   estado?: string;
+  usa_nota_remision?: boolean;
   plan_comercial_id?: string | null;
   vendedor_asignado?: string;
   vendedor_usuario_id?: string | null;

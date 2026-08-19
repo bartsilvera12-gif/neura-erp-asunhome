@@ -42,7 +42,7 @@ async function fallbackProductosPg(schemaRaw: string, empresaId: string): Promis
     if (!pool) return [];
     const t = quoteSchemaTable(schema, "productos");
     const { rows } = await pool.query(
-      `SELECT * FROM ${t} WHERE empresa_id = $1::uuid`,
+      `SELECT * FROM ${t} WHERE empresa_id = $1::uuid AND activo = true`,
       [empresaId]
     );
     return rows;
@@ -207,7 +207,14 @@ export async function GET(request: NextRequest) {
 
     const sp = request.nextUrl.searchParams;
     const includeDebug = sp.get("debug") === "1";
-    const range = parseDateRangeFromQuery(sp);
+    const rawRange = parseDateRangeFromQuery(sp);
+    // Extender `hasta` a fin del dia (23:59:59.999) para que las ventas
+    // hechas durante el dia entero queden incluidas. Sin esto, el `.lte`
+    // contra un timestamptz interpretaba 'YYYY-MM-DD' como 00:00 UTC y
+    // dejaba afuera todas las ventas del propio dia.
+    const range = rawRange
+      ? { desde: rawRange.desde, hasta: `${rawRange.hasta}T23:59:59.999Z` }
+      : null;
 
     // Resolvemos el schema siempre — lo usamos para fallback PG directo
     // cuando se detecta un tenant no expuesto en PostgREST.
@@ -269,7 +276,7 @@ export async function GET(request: NextRequest) {
       buildFacturasQ(),
       buildPagosQ(),
       buildTipificacionesQ(),
-      supabase.from("productos").select("*").eq("empresa_id", empresaId),
+      supabase.from("productos").select("*").eq("empresa_id", empresaId).eq("activo", true),
       buildVentasQ(),
       ventasItemsParalelo,
       buildComprasQ(),
@@ -347,10 +354,82 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Ferrecolor / tenants sin puente Venta→Factura: sintetizamos filas
+    // 'facturas' y 'pagos' a partir de ventas + cuentas_por_cobrar + cobros_clientes,
+    // asi todo el dashboard financiero (KPIs, cobrado por dia, composicion, etc.)
+    // funciona sin depender de la tabla facturas.
+    let facturasRows = pickRows("facturas", facturasQ, queryErrors);
+    let pagosRows = pickRows("pagos", pagosQ, queryErrors);
+
+    if (facturasRows.length === 0) {
+      // Traer CxC + cobros en paralelo (silencioso: si las tablas no existen se ignora).
+      const [cxcRes, cobrosRes] = await Promise.all([
+        supabase.from("cuentas_por_cobrar").select("id, venta_id, saldo, estado, cliente_id").eq("empresa_id", empresaId),
+        (() => {
+          const b = supabase.from("cobros_clientes").select("id, venta_id, cliente_id, monto, fecha_pago").eq("empresa_id", empresaId).is("anulado_at", null);
+          return range ? b.gte("fecha_pago", range.desde).lte("fecha_pago", range.hasta) : b;
+        })(),
+      ]);
+      const cxcRows = (cxcRes?.data ?? []) as Array<{ id: string; venta_id: string; saldo: number | string; estado: string; cliente_id: string | null }>;
+      const cobrosRows = (cobrosRes?.data ?? []) as Array<{ id: string; venta_id: string | null; cliente_id: string | null; monto: number | string; fecha_pago: string }>;
+
+      const saldoPorVenta = new Map<string, number>();
+      for (const c of cxcRows) {
+        if (c.estado === "anulado") continue;
+        const s = Number(c.saldo) || 0;
+        saldoPorVenta.set(String(c.venta_id), s);
+      }
+
+      const ventasParaSintetizar = ventasRows as Array<{
+        id: string; cliente_id: string | null; fecha: string; total: number | string;
+        estado: string; tipo_venta: string; moneda: string; numero_control: string;
+      }>;
+
+      facturasRows = ventasParaSintetizar
+        .filter((v) => v.estado !== "anulada" && v.estado !== "devuelta_total")
+        .map((v) => {
+          const tipo = String(v.tipo_venta || "").toLowerCase() === "credito" ? "mensual" : "contado";
+          const saldo = tipo === "contado" ? 0 : (saldoPorVenta.get(String(v.id)) ?? Number(v.total) ?? 0);
+          return {
+            id: v.id,
+            empresa_id: empresaId,
+            cliente_id: v.cliente_id,
+            numero_control: v.numero_control,
+            monto: Number(v.total) || 0,
+            saldo,
+            estado: "confirmada",
+            tipo,
+            moneda: v.moneda || "PYG",
+            fecha: v.fecha,
+          };
+        });
+
+      // Pagos sinteticos: (a) cada venta contado del periodo cuenta como pago,
+      // (b) mas los cobros de credito reales de cobros_clientes.
+      const pagosContado = ventasParaSintetizar
+        .filter((v) => v.estado !== "anulada" && v.estado !== "devuelta_total")
+        .filter((v) => String(v.tipo_venta || "").toLowerCase() !== "credito")
+        .map((v) => ({
+          id: `venta-${v.id}`,
+          factura_id: v.id,
+          cliente_id: v.cliente_id,
+          monto: Number(v.total) || 0,
+          fecha_pago: v.fecha,
+        }));
+      const pagosCredito = cobrosRows.map((c) => ({
+        id: c.id,
+        factura_id: c.venta_id,
+        cliente_id: c.cliente_id,
+        monto: Number(c.monto) || 0,
+        fecha_pago: c.fecha_pago,
+      }));
+      pagosRows = [...pagosContado, ...pagosCredito];
+    }
+
     const payload = {
       clientes: pickRows("clientes", clientesQ, queryErrors),
-      facturas: pickRows("facturas", facturasQ, queryErrors),
-      pagos: pickRows("pagos", pagosQ, queryErrors),
+      facturas: facturasRows,
+      pagos: pagosRows,
       tipificaciones: pickRows("tipificaciones", tipificacionesQ, queryErrors),
       productos: productosRows,
       ventas: ventasRows,

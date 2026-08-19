@@ -96,7 +96,9 @@ export default function SorteosListClient({ ventasKpis }: { ventasKpis: SorteosV
         <KpiCard label="Monto mes" value={formatGs(ventasKpis.montoMes)} sub="Ingresos del mes" />
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+      {/* overflow-x-auto + min-w activan scroll horizontal mobile.
+          Precio/boleto, Máx, Fecha se ocultan progresivamente. */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto shadow-sm">
         {cargando ? (
           <div className="py-16 text-center text-gray-400 text-sm animate-pulse">Cargando…</div>
         ) : rows.length === 0 ? (
@@ -107,14 +109,14 @@ export default function SorteosListClient({ ventasKpis }: { ventasKpis: SorteosV
             </Link>
           </div>
         ) : (
-          <table className="w-full">
+          <table className="w-full min-w-[820px] sm:min-w-0">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
                 <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Nombre</th>
                 <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Estado</th>
-                <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Fecha sorteo</th>
-                <th className="text-right text-sm font-semibold text-slate-600 px-5 py-3">Precio / boleto</th>
-                <th className="text-right text-sm font-semibold text-slate-600 px-5 py-3">Máx.</th>
+                <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3 hidden md:table-cell">Fecha sorteo</th>
+                <th className="text-right text-sm font-semibold text-slate-600 px-5 py-3 hidden lg:table-cell">Precio / boleto</th>
+                <th className="text-right text-sm font-semibold text-slate-600 px-5 py-3 hidden md:table-cell">Máx.</th>
                 <th className="text-right text-sm font-semibold text-slate-600 px-5 py-3">Vendidos</th>
                 <th className="text-left text-sm font-semibold text-slate-600 px-5 py-3">Acciones</th>
               </tr>
@@ -130,12 +132,12 @@ export default function SorteosListClient({ ventasKpis }: { ventasKpis: SorteosV
                       {s.estado}
                     </span>
                   </td>
-                  <td className="px-5 py-3 text-sm text-slate-600">{formatFecha(s.fecha_sorteo)}</td>
-                  <td className="px-5 py-3 text-sm text-right tabular-nums">{formatGs(s.precio_por_boleto)}</td>
-                  <td className="px-5 py-3 text-sm text-right tabular-nums">{s.max_boletos}</td>
+                  <td className="px-5 py-3 text-sm text-slate-600 hidden md:table-cell">{formatFecha(s.fecha_sorteo)}</td>
+                  <td className="px-5 py-3 text-sm text-right tabular-nums hidden lg:table-cell">{formatGs(s.precio_por_boleto)}</td>
+                  <td className="px-5 py-3 text-sm text-right tabular-nums hidden md:table-cell">{s.max_boletos}</td>
                   <td className="px-5 py-3 text-sm text-right tabular-nums">{s.total_boletos_vendidos}</td>
                   <td className="px-5 py-3">
-                    <Link href={`/sorteos/${s.id}/editar`} className="text-sm text-[#0EA5E9] hover:underline">
+                    <Link href={`/sorteos/${s.id}/editar`} className="inline-flex items-center min-h-[40px] text-sm text-[#0EA5E9] hover:underline">
                       Editar
                     </Link>
                   </td>

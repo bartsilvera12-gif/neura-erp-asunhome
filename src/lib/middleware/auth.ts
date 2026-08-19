@@ -7,6 +7,8 @@ export interface UsuarioConEmpresa {
   empresa_id: string;
   /** PK `zentra_erp.usuarios.id` cuando se resolvió la fila. */
   usuarioCatalogId?: string | null;
+  /** Nombre para mostrar del usuario (catálogo). Para auditoría de movimientos. */
+  nombre?: string | null;
 }
 
 export interface UsuarioConEmpresaYRol extends UsuarioConEmpresa {
@@ -50,5 +52,6 @@ export async function getUserAndEmpresa(request?: Request | null): Promise<Usuar
     user: r.ctx.user,
     empresa_id: r.ctx.empresa_id,
     usuarioCatalogId: r.ctx.usuarioCatalogId ?? null,
+    nombre: r.ctx.usuarioNombre ?? null,
   };
 }

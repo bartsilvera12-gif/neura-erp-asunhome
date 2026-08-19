@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans, Geist_Mono } from "next/font/google";
 import AppShell from "../components/AppShell";
 import { ThemeProvider } from "../components/ThemeProvider";
@@ -17,8 +17,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ASUNHOME ERP",
-  description: "Sistema de gestión empresarial de ASUNHOME",
+  title: "ASUNHOME",
+  description: "Sistema de gestión Zentra — ASUNHOME",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

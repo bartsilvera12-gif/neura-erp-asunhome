@@ -34,20 +34,16 @@ import {
   type SupervisorAgentLoadRow,
 } from "@/lib/chat/chat-ops-actions";
 import { INBOX_HEARTBEAT_INTERVAL_MS } from "@/lib/chat/agent-presence";
-import { formatWaitHuman } from "@/lib/chat/format-wait-human";
 import { listActiveQuickRepliesForChannel } from "@/lib/chat/quick-replies-actions";
-import { ArrowLeftRight, Flame, Mic, Paperclip, RefreshCw, Square, UserRound, Zap } from "lucide-react";
+import { ArrowLeftRight, Mic, Paperclip, RefreshCw, Square, Zap } from "lucide-react";
 import {
   finalizeConversationWithClosure,
   loadFinalizeOptionsForConversation,
   type FinalizeOptionsResult,
 } from "@/lib/chat/conversation-finalize-actions";
 import {
-  getErpAttachmentCaption,
   getErpAttachmentFilename,
-  getErpAttachmentPublicUrl,
   getMetaInboundDocumentFilename,
-  getWhatsAppMediaUrlFromRawPayload,
   isImageMimeHint,
 } from "@/lib/chat/message-erp-display";
 import { assignmentWaitBadge, assignmentWaitBadgeClass } from "@/lib/chat/inbox-assignment-labels";
@@ -56,236 +52,29 @@ import { playInboxNotificationBeep, readInboxNotificationSoundEnabled } from "@/
 import { createBrowserClientForSchema } from "@/lib/supabase";
 import { ChannelBadge } from "@/components/chat/ChannelBadge";
 
-type ChatMessage = {
-  id: string;
-  from_me: boolean;
-  message_type: string;
-  content: string | null;
-  created_at: string;
-  raw_payload?: Record<string, unknown> | null;
-};
-
-function formatTime(iso: string) {
-  try {
-    return new Date(iso).toLocaleString("es-PY", {
-      day: "2-digit",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function mapRowToMessage(row: Record<string, unknown>): ChatMessage {
-  return {
-    id: row.id as string,
-    from_me: Boolean(row.from_me),
-    message_type: String(row.message_type ?? "text"),
-    content: (row.content as string | null) ?? null,
-    created_at: String(row.created_at),
-    raw_payload:
-      typeof row.raw_payload === "object" && row.raw_payload !== null
-        ? (row.raw_payload as Record<string, unknown>)
-        : null,
-  };
-}
-
-function parseOutgoingImageMessage(message: ChatMessage): { url: string | null; caption: string | null } {
-  const erpUrl = getErpAttachmentPublicUrl(message.raw_payload);
-  if (erpUrl) {
-    const cap = getErpAttachmentCaption(message.raw_payload) ?? getErpAttachmentFilename(message.raw_payload);
-    return { url: erpUrl, caption: cap };
-  }
-  const waUrl = getWhatsAppMediaUrlFromRawPayload(message.raw_payload);
-  if (waUrl) {
-    const imagePayload = (message.raw_payload?.image as { caption?: string } | undefined) ?? {};
-    const cap = typeof imagePayload.caption === "string" ? imagePayload.caption.trim() : "";
-    return { url: waUrl, caption: cap || null };
-  }
-  const imagePayload = (message.raw_payload?.image as { link?: string; caption?: string } | undefined) ?? {};
-  const link = typeof imagePayload.link === "string" ? imagePayload.link.trim() : "";
-  const captionFromPayload = typeof imagePayload.caption === "string" ? imagePayload.caption.trim() : "";
-  if (link) return { url: link, caption: captionFromPayload || null };
-
-  const lines = (message.content ?? "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const urlLine = lines.find((line) => /^https?:\/\//i.test(line)) ?? null;
-  const captionLine = lines.find((line) => !/^https?:\/\//i.test(line) && !/^Imagen enviada:?/i.test(line)) ?? null;
-  return { url: urlLine, caption: captionLine };
-}
-
-function resolveAttachmentUrl(message: ChatMessage): string | null {
-  return (
-    getErpAttachmentPublicUrl(message.raw_payload) ??
-    getWhatsAppMediaUrlFromRawPayload(message.raw_payload) ??
-    parseOutgoingImageMessage(message).url
-  );
-}
-
-function displayFilenameForAttachment(message: ChatMessage): string {
-  const erp = getErpAttachmentFilename(message.raw_payload);
-  if (erp) return erp;
-  const meta = getMetaInboundDocumentFilename(message.raw_payload);
-  if (meta) return meta;
-  const raw = (message.content ?? "").trim();
-  const m = /^\[documento\]\s*(.+)$/i.exec(raw);
-  if (m?.[1]?.trim()) return m[1].trim();
-  if (raw && !raw.startsWith("[")) return raw.slice(0, 120);
-  return message.message_type === "video" ? "Video" : "Archivo";
-}
-
-function tabClass(active: boolean) {
-  return `px-3 py-2 text-xs font-semibold rounded-lg transition-colors ${
-    active ? "bg-white text-slate-800 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"
-  }`;
-}
-
-/**
- * Control segmentado: el modo activo = pastilla blanca con borde de color (no “todo verde”);
- * el inactivo = gris plano (se entiende qué está elegido).
- */
-function opPresenceToggleClass(isSelected: boolean, variant: "ready" | "offline") {
-  const base =
-    "px-3 py-1.5 text-xs font-semibold rounded-md transition-all disabled:opacity-50 min-w-[6.75rem] text-center border-2";
-  if (!isSelected) {
-    return `${base} border-transparent bg-slate-200/60 text-slate-500 hover:bg-slate-200 hover:text-slate-600`;
-  }
-  if (variant === "ready") {
-    return `${base} border-emerald-500 bg-white text-emerald-700 shadow-sm ring-1 ring-emerald-200/90 z-[1]`;
-  }
-  return `${base} border-slate-600 bg-white text-slate-800 shadow-sm ring-1 ring-slate-200/90 z-[1]`;
-}
-
-function LiveElapsedLabel({ sinceIso }: { sinceIso: string | null }) {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    // Guard de visibility: si la pestana esta oculta no tiene sentido re-renderizar
-    // cada segundo. Cada item visible monta su propio timer; en un inbox con 100
-    // conversaciones eso son 100 re-renders por segundo desperdiciados en background.
-    const id = window.setInterval(() => {
-      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      setTick((x) => x + 1);
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, []);
-  if (!sinceIso) return <span className="text-slate-400">—</span>;
-  return <span className="tabular-nums font-medium">{formatWaitHuman(sinceIso)}</span>;
-}
-
-function inboxClientWaitingSince(c: InboxConversation): string | null {
-  if (c.awaiting_agent_reply_since) return null;
-  return c.awaiting_client_reply_since ?? null;
-}
-
-function InboxReplyTurnBadges({ c, dense }: { c: InboxConversation; dense?: boolean }) {
-  const agentSince = c.awaiting_agent_reply_since;
-  const clientSince = inboxClientWaitingSince(c);
-  if (!agentSince && !clientSince) return null;
-  const pad = dense ? "px-1.5 py-0.5 text-[9px]" : "px-1.5 py-0.5 text-[10px]";
-  return (
-    <>
-      {agentSince ? (
-        <span
-          className={`inline-flex items-center gap-0.5 font-semibold text-orange-950 bg-orange-50 border border-orange-200 rounded ${pad} shrink-0`}
-          title="Cliente escribió; falta respuesta humana del asesor"
-        >
-          <Flame className={`shrink-0 text-orange-600 ${dense ? "w-3 h-3" : "w-3.5 h-3.5"}`} aria-hidden />
-          <LiveElapsedLabel sinceIso={agentSince} />
-        </span>
-      ) : null}
-      {clientSince ? (
-        <span
-          className={`inline-flex items-center gap-0.5 font-semibold text-sky-950 bg-sky-50 border border-sky-200 rounded ${pad} shrink-0`}
-          title="Último mensaje saliente; turno del contacto"
-        >
-          <UserRound className={`shrink-0 text-sky-600 ${dense ? "w-3 h-3" : "w-3.5 h-3.5"}`} aria-hidden />
-          <LiveElapsedLabel sinceIso={clientSince} />
-        </span>
-      ) : null}
-    </>
-  );
-}
-
-function parseInboxFilters(sp: URLSearchParams): ChatInboxFilters | undefined {
-  const rawA = sp.get("asignacion");
-  const assignment: ChatInboxAssignmentFilter =
-    rawA === "mios" ? "mine" : rawA === "sin_asignar" ? "unassigned" : "all";
-  const queue_id = sp.get("cola")?.trim() || null;
-  const channel_id = sp.get("canal")?.trim() || null;
-  const statusRaw = sp.get("estado")?.trim().toLowerCase() || null;
-  const priorityRaw = sp.get("prioridad")?.trim().toLowerCase() || null;
-  const status =
-    statusRaw && ["open", "pending", "closed"].includes(statusRaw) ? statusRaw : null;
-  const priority =
-    priorityRaw && ["low", "medium", "high"].includes(priorityRaw) ? priorityRaw : null;
-  const has =
-    assignment !== "all" ||
-    (queue_id && queue_id.length > 0) ||
-    status !== null ||
-    priority !== null ||
-    (channel_id && channel_id.length > 0);
-  if (!has) return undefined;
-  return {
-    assignment,
-    queue_id: queue_id && queue_id.length > 0 ? queue_id : null,
-    status,
-    priority,
-    channel_id: channel_id && channel_id.length > 0 ? channel_id : null,
-  };
-}
-
-function formatChannelOptionLabel(c: ChatChannelRow): string {
-  const name = (c.nombre ?? "").trim() || "Canal";
-  const kind = [c.type, c.provider].filter(Boolean).join(" / ");
-  const mp = c.meta_phone_number_id?.trim();
-  const tail =
-    mp && mp.length > 0
-      ? ` · ${mp.length > 18 ? `${mp.slice(0, 16)}…` : mp}`
-      : "";
-  return `${name} · ${kind}${tail}`;
-}
-
-function labelEstado(s: string) {
-  if (s === "open") return "Abierta";
-  if (s === "pending") return "Pendiente";
-  if (s === "closed") return "Cerrada";
-  return s;
-}
-
-function badgeEstadoClass(s: string) {
-  if (s === "open") return "text-sky-800 bg-sky-50 border-sky-200";
-  if (s === "pending") return "text-amber-800 bg-amber-50 border-amber-200";
-  if (s === "closed") return "text-slate-600 bg-slate-100 border-slate-200";
-  return "text-slate-600 bg-slate-50 border-slate-200";
-}
-
-function omnicanalRoleBadgeClass(role: string | null): string {
-  if (role === "admin") return "text-slate-800 bg-slate-100 border-slate-200";
-  if (role === "supervisor") return "text-sky-800 bg-sky-50 border-sky-200";
-  if (role === "agente") return "text-indigo-900 bg-indigo-50 border-indigo-200";
-  return "text-slate-600 bg-slate-50 border-slate-200";
-}
-
-function omnicanalRoleShortLabel(role: string | null): string | null {
-  if (!role) return null;
-  if (role === "admin") return "Admin";
-  if (role === "supervisor") return "Supervisor";
-  if (role === "agente") return "Agente";
-  return null;
-}
-
-const CHAT_LIST_DEBUG = process.env.NEXT_PUBLIC_CHAT_LIST_DEBUG === "true";
-function chatListUiLog(
-  sub: "initial-data" | "refetch-start" | "refetch-result" | "set-conversations" | "filters-applied" | "tab-split" | "refetch-preserve",
-  payload: Record<string, unknown>
-) {
-  if (!CHAT_LIST_DEBUG) return;
-  console.info(`[chat-ui][${sub}]`, { ...payload, timestamp: new Date().toISOString() });
-}
+// Helpers puros + sub-componentes presentacionales extraidos a _components/
+// Reduce el monolito de 2902 lineas y permite memo() en cada hijo.
+import type { ChatMessage } from "./_components/types";
+import { ImageLightbox } from "./_components/ImageLightbox";
+import { LiveElapsedLabel } from "./_components/LiveElapsedLabel";
+import { InboxReplyTurnBadges } from "./_components/InboxReplyTurnBadges";
+import {
+  badgeEstadoClass,
+  chatListUiLog,
+  displayFilenameForAttachment,
+  formatChannelOptionLabel,
+  formatTime,
+  inboxClientWaitingSince,
+  labelEstado,
+  mapRowToMessage,
+  omnicanalRoleBadgeClass,
+  omnicanalRoleShortLabel,
+  opPresenceToggleClass,
+  parseInboxFilters,
+  parseOutgoingImageMessage,
+  resolveAttachmentUrl,
+  tabClass,
+} from "./_components/utils";
 
 export type ConversacionesClientMode = "inbox" | "historial";
 
@@ -354,6 +143,9 @@ export function ConversacionesClient({
   const [compApproveConfirmId, setCompApproveConfirmId] = useState<string | null>(null);
   const [compApprovalInfo, setCompApprovalInfo] = useState<string | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // Handler estable para el ImageLightbox memoizado: sin useCallback el padre
+  // creaba un closure nuevo en cada render y memo() era inutil.
+  const closeLightbox = useCallback(() => setLightboxUrl(null), []);
   const [opsQueues, setOpsQueues] = useState<ChatQueueListRow[]>([]);
   const [opsAgentLoads, setOpsAgentLoads] = useState<SupervisorAgentLoadRow[]>([]);
   const [opsBusy, setOpsBusy] = useState(false);
@@ -739,12 +531,18 @@ export function ConversacionesClient({
   }, [loadConversations, inboxFilterKey]);
 
   useEffect(() => {
+    // cancelled flag: si la pagina de conversaciones se desmonta (user navega a otro
+    // modulo) antes de que estos dos RPCs respondan, evitamos setState-after-unmount.
+    // No usamos AbortController porque los wrappers (listChatQueues, fetchSupervisorAgentLoads)
+    // no aceptan signal — son llamadas via cliente Supabase, no fetch directo.
+    let cancelled = false;
     listChatQueues()
-      .then(setOpsQueues)
-      .catch(() => setOpsQueues([]));
+      .then((v) => { if (!cancelled) setOpsQueues(v); })
+      .catch(() => { if (!cancelled) setOpsQueues([]); });
     fetchSupervisorAgentLoads()
-      .then(setOpsAgentLoads)
-      .catch(() => setOpsAgentLoads([]));
+      .then((v) => { if (!cancelled) setOpsAgentLoads(v); })
+      .catch(() => { if (!cancelled) setOpsAgentLoads([]); });
+    return () => { cancelled = true; };
   }, []);
 
   const patchInboxQuery = useCallback(
@@ -829,15 +627,20 @@ export function ConversacionesClient({
   }
 
   useEffect(() => {
+    // Mismo patron: cancelled flag para evitar setState tras unmount.
+    let cancelled = false;
     fetchChatChannels()
       .then((ch) => {
+        if (cancelled) return;
         setHasActiveChannel(ch.some((c) => c.activo));
         setInboxChannels(ch.filter((c) => c.activo));
       })
       .catch(() => {
+        if (cancelled) return;
         setHasActiveChannel(null);
         setInboxChannels([]);
       });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -845,10 +648,15 @@ export function ConversacionesClient({
       setBotFlowsChecked(true);
       return;
     }
+    // cancelled flag: si el modo cambia o el componente se desmonta antes
+    // de que termine el RPC, no actualizamos state obsoleto.
+    let cancelled = false;
     void hasEmpresaActiveChatFlows().then((v) => {
+      if (cancelled) return;
       setHasActiveBotFlows(v);
       setBotFlowsChecked(true);
     });
+    return () => { cancelled = true; };
   }, [mode]);
 
   useEffect(() => {
@@ -1548,22 +1356,7 @@ export function ConversacionesClient({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 h-[calc(100dvh-4.75rem)] max-h-[calc(100dvh-4.75rem)] gap-1 overflow-hidden">
-      {lightboxUrl ? (
-        <button
-          type="button"
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 border-0 cursor-zoom-out"
-          onClick={() => setLightboxUrl(null)}
-          aria-label="Cerrar vista ampliada"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={lightboxUrl}
-            alt="Vista ampliada"
-            className="max-h-[92vh] max-w-full object-contain rounded-lg shadow-2xl"
-            onClick={(ev) => ev.stopPropagation()}
-          />
-        </button>
-      ) : null}
+      <ImageLightbox url={lightboxUrl} onClose={closeLightbox} />
 
       {compApproveConfirmId ? (
         <div
@@ -2179,15 +1972,22 @@ export function ConversacionesClient({
       )}
 
       <div className="flex flex-1 min-h-0 border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm">
-        {/* Lista */}
-        {!listColumnHidden ? (
-        <div className="w-full max-w-[min(360px,40vw)] shrink-0 border-r border-slate-200 flex flex-col min-h-0 bg-slate-50/80">
+        {/* Lista — Master/Detail responsive:
+              MOBILE (< lg): visible cuando NO hay chat seleccionado, ocupa todo el ancho.
+                             Cuando user selecciona un chat -> se oculta y aparece el panel mensajes.
+              DESKTOP (>= lg): respeta el toggle manual `listColumnHidden`.
+                               Si listColumnHidden=true se oculta tambien en desktop.
+              Logica combinada: selectedId controla mobile, listColumnHidden controla desktop.
+        */}
+        <div className={`${selectedId ? "hidden" : "flex"} ${listColumnHidden ? "lg:hidden" : "lg:flex"} w-full lg:max-w-[min(360px,40vw)] shrink-0 lg:border-r border-slate-200 flex-col min-h-0 bg-slate-50/80`}>
           <div className="px-2 py-1.5 border-b border-slate-200 flex items-center justify-between gap-2 shrink-0">
             <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Chats</span>
+            {/* Solo desktop: en mobile la lista se auto-oculta al seleccionar un chat,
+                no hace falta toggle manual. */}
             <button
               type="button"
               onClick={() => setListColumnHidden(true)}
-              className="text-[10px] font-medium text-slate-500 hover:text-slate-800 px-1.5 py-0.5 rounded border border-transparent hover:border-slate-200 hover:bg-white"
+              className="hidden lg:inline-flex text-[10px] font-medium text-slate-500 hover:text-slate-800 px-1.5 py-0.5 rounded border border-transparent hover:border-slate-200 hover:bg-white"
               title="Ocultar lista de chats"
             >
               Ocultar
@@ -2287,10 +2087,13 @@ export function ConversacionesClient({
             )}
           </div>
         </div>
-        ) : null}
 
-        {/* Panel mensajes */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+        {/* Panel mensajes — Master/Detail responsive:
+              MOBILE (< lg): visible solo cuando HAY chat seleccionado.
+                             Si no, la lista ocupa toda la pantalla.
+              DESKTOP (>= lg): siempre visible (con empty state si no hay chat).
+        */}
+        <div className={`${!selectedId ? "hidden lg:flex" : "flex"} flex-1 flex-col min-w-0 min-h-0 overflow-hidden`}>
           {!selectedId ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-400 text-sm min-h-0 px-2">
               <span>Seleccioná una conversación</span>
@@ -2311,6 +2114,19 @@ export function ConversacionesClient({
                   <div className="flex flex-col gap-0.5 min-w-0 w-full">
                     <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 min-w-0">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 flex-1">
+                        {/* Boton "Volver a la lista" — solo en mobile. En desktop la lista ya
+                            esta visible al costado, no hace falta. min-h/min-w 36px para tap target. */}
+                        <button
+                          type="button"
+                          onClick={() => setSelectedId(null)}
+                          className="lg:hidden inline-flex items-center justify-center min-w-[36px] min-h-[36px] -ml-1 rounded-md text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors shrink-0"
+                          aria-label="Volver a la lista de chats"
+                          title="Volver"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                            <path fillRule="evenodd" d="M12.78 5.22a.75.75 0 0 1 0 1.06L9.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
+                          </svg>
+                        </button>
                         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0 min-w-0">
                           <span className="font-semibold text-slate-900 text-sm leading-tight truncate max-w-[min(100%,14rem)]">
                             {selected.contact.name?.trim() ? selected.contact.name.trim() : "Sin nombre"}
@@ -2339,7 +2155,7 @@ export function ConversacionesClient({
                             <button
                               type="button"
                               onClick={() => setListColumnHidden(false)}
-                              className="shrink-0 text-[9px] font-medium text-slate-600 hover:text-slate-900 border border-slate-200 rounded px-1 py-0.5 bg-white"
+                              className="hidden lg:inline-flex shrink-0 text-[9px] font-medium text-slate-600 hover:text-slate-900 border border-slate-200 rounded px-1 py-0.5 bg-white"
                               title="Mostrar lista de chats"
                             >
                               Chats

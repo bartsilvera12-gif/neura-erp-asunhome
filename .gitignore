@@ -45,6 +45,3 @@ next-env.d.ts
 
 # Playwright E2E artefactos locales
 e2e-super-admin*.png
-
-# permitir el ejemplo de entorno
-!.env.example

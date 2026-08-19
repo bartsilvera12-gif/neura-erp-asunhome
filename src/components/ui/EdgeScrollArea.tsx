@@ -101,7 +101,7 @@ export default function EdgeScrollArea({
     <div className={`relative ${className}`} {...rest}>
       <div
         ref={containerRef}
-        className="overflow-x-auto"
+        className="overflow-x-auto overscroll-x-contain pb-2"
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
       >

@@ -77,6 +77,52 @@ export async function signProductoImagen(
 }
 
 /**
+ * Resuelve la URL pública de imagen para una lista de productos del sitio.
+ *
+ * El ERP guarda la imagen en `imagen_path` (bucket privado) y deja `imagen_url`
+ * en null; la web lee `imagen_url`. Este helper firma en lote los `imagen_path`
+ * pendientes y los devuelve en `imagen_url`, dejando el path fuera de la
+ * respuesta. Si un producto ya trae `imagen_url`, se respeta.
+ *
+ * TTL largo (7 días) para que la URL firmada sobreviva al cache del CDN y a la
+ * sesión del visitante.
+ */
+export async function resolverImagenesPublicas<
+  T extends { imagen_url?: string | null; imagen_path?: string | null }
+>(
+  supabase: AppSupabaseClient,
+  productos: T[],
+  ttlSeconds = 60 * 60 * 24 * 7
+): Promise<Array<Omit<T, "imagen_path">>> {
+  const pendientes = Array.from(
+    new Set(
+      productos
+        .filter((p) => !p.imagen_url && p.imagen_path)
+        .map((p) => p.imagen_path as string)
+    )
+  );
+  const firmadas = new Map<string, string>();
+  if (pendientes.length > 0) {
+    try {
+      const { data } = await supabase.storage
+        .from(PRODUCTOS_IMAGENES_BUCKET)
+        .createSignedUrls(pendientes, ttlSeconds);
+      pendientes.forEach((path, i) => {
+        const url = data?.[i]?.signedUrl;
+        if (url) firmadas.set(path, url);
+      });
+    } catch {
+      // Sin firma: los productos afectados caen al placeholder del sitio.
+    }
+  }
+  return productos.map(({ imagen_path, ...rest }) => ({
+    ...rest,
+    imagen_url:
+      rest.imagen_url ?? (imagen_path ? firmadas.get(imagen_path) ?? null : null),
+  }));
+}
+
+/**
  * Valida que el path pertenezca a la empresa indicada (primer segmento).
  * Previene cross-tenant en operaciones que reciben paths arbitrarios.
  */

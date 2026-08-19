@@ -51,6 +51,47 @@ export function buildXlsxBuffer<T>(
   return buf;
 }
 
+/** Spec de una hoja ya materializada (header + filas como matriz). */
+export interface XlsxSheetSpec {
+  sheetName: string;
+  aoa: (string | number | boolean | Date)[][];
+  colWidths?: number[];
+}
+
+/** Convierte filas tipadas + columnas en una hoja (header incluido). */
+export function sheetFromRows<T>(
+  sheetName: string,
+  rows: T[],
+  columns: ExportColumn<T>[]
+): XlsxSheetSpec {
+  const header = columns.map((c) => c.header);
+  const data = rows.map((row) =>
+    columns.map((c) => {
+      const v = c.value(row);
+      if (v == null) return "";
+      return v;
+    })
+  );
+  return {
+    sheetName: sheetName.slice(0, 31),
+    aoa: [header, ...data],
+    colWidths: columns.map((c) => c.width ?? 16),
+  };
+}
+
+/** Construye un workbook con varias hojas y devuelve el Buffer. */
+export function buildXlsxBufferSheets(sheets: XlsxSheetSpec[]): Buffer {
+  const wb = XLSX.utils.book_new();
+  for (const s of sheets) {
+    const ws = XLSX.utils.aoa_to_sheet(s.aoa);
+    if (s.colWidths && s.colWidths.length > 0) {
+      ws["!cols"] = s.colWidths.map((w) => ({ wch: w }));
+    }
+    XLSX.utils.book_append_sheet(wb, ws, s.sheetName.slice(0, 31));
+  }
+  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+}
+
 export function xlsxResponseHeaders(filename: string): HeadersInit {
   const safe = filename.replace(/[^a-zA-Z0-9_.-]+/g, "_");
   return {

@@ -159,21 +159,26 @@ export default function PlanesPage() {
         <span className="font-semibold text-gray-700">{planes.length}</span> planes
       </p>
 
-      {/* Tabla */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* Tabla — overflow-x-auto + min-w fuerzan scroll horizontal en mobile;
+          columnas Codigo/Usuarios/Clientes/Facturas se ocultan progresivamente. */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
         {filtrados.length === 0 ? (
           <div className="py-16 text-center text-sm text-gray-400">
             No se encontraron planes con los filtros aplicados.
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[960px] sm:min-w-0 text-sm">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
-                {["Código", "Nombre", "Precio", "Periodicidad", "Usuarios", "Clientes", "Facturas", "Estado", "Acciones"].map((h) => (
-                  <th key={h} className="text-left text-sm font-semibold text-slate-600 px-4 py-3 uppercase tracking-wide whitespace-nowrap">
-                    {h}
-                  </th>
-                ))}
+                <th className="text-left text-sm font-semibold text-slate-600 px-4 py-3 uppercase tracking-wide whitespace-nowrap hidden lg:table-cell">Código</th>
+                <th className="text-left text-sm font-semibold text-slate-600 px-4 py-3 uppercase tracking-wide whitespace-nowrap">Nombre</th>
+                <th className="text-left text-sm font-semibold text-slate-600 px-4 py-3 uppercase tracking-wide whitespace-nowrap">Precio</th>
+                <th className="text-left text-sm font-semibold text-slate-600 px-4 py-3 uppercase tracking-wide whitespace-nowrap hidden md:table-cell">Periodicidad</th>
+                <th className="text-left text-sm font-semibold text-slate-600 px-4 py-3 uppercase tracking-wide whitespace-nowrap hidden lg:table-cell">Usuarios</th>
+                <th className="text-left text-sm font-semibold text-slate-600 px-4 py-3 uppercase tracking-wide whitespace-nowrap hidden lg:table-cell">Clientes</th>
+                <th className="text-left text-sm font-semibold text-slate-600 px-4 py-3 uppercase tracking-wide whitespace-nowrap hidden lg:table-cell">Facturas</th>
+                <th className="text-left text-sm font-semibold text-slate-600 px-4 py-3 uppercase tracking-wide whitespace-nowrap hidden md:table-cell">Estado</th>
+                <th className="text-left text-sm font-semibold text-slate-600 px-4 py-3 uppercase tracking-wide whitespace-nowrap">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
@@ -183,7 +188,7 @@ export default function PlanesPage() {
                   className={`border-b border-slate-200 hover:bg-slate-50 transition-colors ${plan.estado === "inactivo" ? "opacity-60" : ""}`}
                 >
                   {/* Código */}
-                  <td className="px-4 py-3 font-mono text-xs font-semibold text-gray-600 whitespace-nowrap">
+                  <td className="px-4 py-3 font-mono text-xs font-semibold text-gray-600 whitespace-nowrap hidden lg:table-cell">
                     {plan.codigo_plan}
                   </td>
                   {/* Nombre */}
@@ -200,21 +205,21 @@ export default function PlanesPage() {
                     {formatPrecio(plan)}
                   </td>
                   {/* Periodicidad */}
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 hidden md:table-cell">
                     <BadgePeriodicidad p={plan.periodicidad} />
                   </td>
                   {/* Límites */}
-                  <td className="px-4 py-3 text-xs text-gray-600 tabular-nums">
+                  <td className="px-4 py-3 text-xs text-gray-600 tabular-nums hidden lg:table-cell">
                     {limiteLabel(plan.limite_usuarios)}
                   </td>
-                  <td className="px-4 py-3 text-xs text-gray-600 tabular-nums">
+                  <td className="px-4 py-3 text-xs text-gray-600 tabular-nums hidden lg:table-cell">
                     {limiteLabel(plan.limite_clientes)}
                   </td>
-                  <td className="px-4 py-3 text-xs text-gray-600 tabular-nums">
+                  <td className="px-4 py-3 text-xs text-gray-600 tabular-nums hidden lg:table-cell">
                     {limiteLabel(plan.limite_facturas)}
                   </td>
                   {/* Estado */}
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 hidden md:table-cell">
                     <BadgeEstado estado={plan.estado} />
                   </td>
                   {/* Acciones */}
@@ -224,7 +229,7 @@ export default function PlanesPage() {
                       <Link
                         href={`/planes/${plan.id}`}
                         title="Ver plan"
-                        className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                        className="inline-flex items-center justify-center min-w-[40px] min-h-[40px] rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
                           <path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
@@ -235,7 +240,7 @@ export default function PlanesPage() {
                       <Link
                         href={`/planes/${plan.id}?edit=1`}
                         title="Editar plan"
-                        className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                        className="inline-flex items-center justify-center min-w-[40px] min-h-[40px] rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
                           <path d="M2.695 14.763l-1.262 3.154a.5.5 0 0 0 .65.65l3.155-1.262a4 4 0 0 0 1.343-.885L17.5 5.5a2.121 2.121 0 0 0-3-3L3.58 13.42a4 4 0 0 0-.885 1.343Z" />
@@ -246,7 +251,7 @@ export default function PlanesPage() {
                         type="button"
                         title={plan.estado === "activo" ? "Desactivar plan" : "Activar plan"}
                         onClick={() => handleToggleEstado(plan)}
-                        className={`inline-flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${
+                        className={`inline-flex items-center justify-center min-w-[40px] min-h-[40px] rounded-lg transition-colors ${
                           plan.estado === "activo"
                             ? "text-gray-400 hover:text-red-600 hover:bg-red-50"
                             : "text-gray-400 hover:text-green-600 hover:bg-green-50"

@@ -31,8 +31,23 @@ export async function fetchWithSupabaseSession(
       credentials: init?.credentials ?? "include",
     });
   } catch (e) {
+    // Preservar AbortError tal cual para que el caller pueda hacer
+    //   catch (err) { if (err instanceof DOMException && err.name === "AbortError") return; }
+    // Sin esto, el wrapper Error lo enmascaraba y el caller no podia distinguir
+    // un abort intencional (componente desmontado) de un fallo de red real.
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
     throw new Error(`fetchWithSupabaseSession: ${serializeUnknownError(e)}`);
   }
+}
+
+/**
+ * Helper: true si el error proviene de un AbortController.
+ * Sirve para llamadas que pueden venir del wrapper o de fetch nativo.
+ */
+export function isAbortError(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === "AbortError") return true;
+  if (err instanceof Error && err.name === "AbortError") return true;
+  return false;
 }
 
 /** Alias: todas las llamadas a `/api/*` autenticadas desde el browser deben usar esto (JWT localStorage). */

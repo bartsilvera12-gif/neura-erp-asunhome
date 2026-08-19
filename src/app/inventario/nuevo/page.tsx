@@ -7,17 +7,18 @@ import MontoInput from "@/components/ui/MontoInput";
 import SelectFromList from "@/components/inventario/SelectFromList";
 import { productoExiste, saveProducto } from "@/lib/inventario/storage";
 import type { MetodoValuacion } from "@/lib/inventario/types";
+import { ShoppingBag, Boxes, ClipboardList, type LucideIcon } from "lucide-react";
 
 // Opciones estándar de unidad de medida para gastro
 const UNIDADES_OPCIONES = [
   "UNIDAD","KG","G","LT","ML","CAJA","BOLSA","PAQUETE","DOCENA","LATA","BOTELLA","PORCION","COMBO",
 ] as const;
 
-const TIPO_SUMMARY = {
-  reventa: { titulo: "Producto de reventa", descripcion: "Se compra y se vende tal cual. Controla stock y descuenta al vender.", icono: "🥤" },
-  menu:    { titulo: "Producto del menú",   descripcion: "Se vende en Ventas y genera pedido. No descuenta stock directo.",     icono: "🍕" },
-  materia: { titulo: "Materia prima / insumo", descripcion: "Se usa para recetas y costeo. No aparece como producto de venta.", icono: "🌾" },
-} as const;
+const TIPO_SUMMARY: Record<"reventa" | "menu" | "materia", { titulo: string; descripcion: string; Icon: LucideIcon; acento: string }> = {
+  reventa: { titulo: "Producto de reventa", descripcion: "Se compra y se vende tal cual. Controla stock y descuenta al vender.", Icon: ShoppingBag, acento: "text-sky-600" },
+  menu:    { titulo: "Producto del menú",   descripcion: "Se vende en Ventas y genera pedido. No descuenta stock directo.",     Icon: ClipboardList, acento: "text-amber-600" },
+  materia: { titulo: "Materia prima / insumo", descripcion: "Se usa para recetas y costeo. No aparece como producto de venta.", Icon: Boxes, acento: "text-emerald-600" },
+};
 
 interface CatRow { id: string; nombre: string }
 interface UbiRow { id: string; nombre: string; tipo: string }
@@ -36,14 +37,19 @@ export default function NuevoProductoPage() {
     costo_promedio: "",
     markup: "",
     precio_venta: "",
+    precio_mayorista: "",
+    precio_distribuidor: "",
+    cantidad_minima_mayorista: "",
     stock_actual: "",
     stock_minimo: "",
-    unidad_medida: "",
+    // ERP ferreteria: default UNIDAD. Se pueden cambiar en el formulario.
+    unidad_medida: "UNIDAD",
     metodo_valuacion: "CPP" as MetodoValuacion,
   });
   const [submitting, setSubmitting] = useState(false);
   const [generandoCodigo, setGenerandoCodigo] = useState(false);
-  const [codigoGeneradoInterno, setCodigoGeneradoInterno] = useState(false);
+  const [generandoSku, setGenerandoSku] = useState(false);
+  const [skuPatrones, setSkuPatrones] = useState<{ prefix: string; siguiente: string }[]>([]);
 
   // Relaciones opcionales
   const [categoriaId, setCategoriaId] = useState<string | null>(null);
@@ -54,9 +60,11 @@ export default function NuevoProductoPage() {
   const [esVendible, setEsVendible] = useState(true);
   const [esInsumo, setEsInsumo] = useState(false);
 
-  // Selector inicial de tipo gastronómico — aplica presets a los flags
+  // Selector inicial de tipo gastronómico — aplica presets a los flags.
+  // ERP ferreteria: siempre arranca en "reventa" y se saltea el selector.
+  // El modulo sigue admitiendo "menu"/"materia" en codigo por si se reactiva.
   type TipoGastro = "reventa" | "menu" | "materia" | null;
-  const [tipoGastro, setTipoGastro] = useState<TipoGastro>(null);
+  const [tipoGastro, setTipoGastro] = useState<TipoGastro>("reventa");
   function aplicarTipoGastro(tipo: Exclude<TipoGastro, null>) {
     setTipoGastro(tipo);
     if (tipo === "reventa") {
@@ -79,6 +87,13 @@ export default function NuevoProductoPage() {
 
   // Configuración gastronómica
   const [controlaStock, setControlaStock] = useState(true);
+  // Producto destacado: aparece en seccion "Productos destacados" del sitio publico.
+  const [destacado, setDestacado] = useState(false);
+  // Descuento promocional (oferta) — modelo: tipo + valor + ventana temporal.
+  const [discountType, setDiscountType] = useState<"" | "percentage" | "fixed">("");
+  const [discountValue, setDiscountValue] = useState("");
+  const [discountStartsAt, setDiscountStartsAt] = useState("");
+  const [discountEndsAt, setDiscountEndsAt] = useState("");
   const [valorizado, setValorizado] = useState(true);
   const [unidadCompra, setUnidadCompra] = useState("");
   const [unidadReceta, setUnidadReceta] = useState("");
@@ -147,22 +162,55 @@ export default function NuevoProductoPage() {
     setImagenError(null);
   }
 
-  async function handleGenerarCodigoInterno() {
+  // Patrones de SKU según el tipo elegido (para "Generar SKU" y el dropdown).
+  useEffect(() => {
+    if (!tipoGastro) return;
+    let cancel = false;
+    fetch(`/api/productos/sku-sugerencias?tipo=${tipoGastro}`, { credentials: "include", cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => { if (!cancel && j?.success) setSkuPatrones(j.data?.patrones ?? []); })
+      .catch(() => {});
+    return () => { cancel = true; };
+  }, [tipoGastro]);
+
+  async function handleGenerarSku() {
+    if (generandoSku) return;
+    setGenerandoSku(true);
+    setErrorDuplicado(null);
+    try {
+      const res = await fetch(`/api/productos/sku-sugerencias?tipo=${tipoGastro ?? "reventa"}`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const json = await res.json();
+      if (res.ok && json?.success && json.data?.sugerido) {
+        setForm((prev) => ({ ...prev, sku: json.data.sugerido as string }));
+        setSkuPatrones(json.data.patrones ?? []);
+      }
+    } catch { /* no bloquea */ } finally {
+      setGenerandoSku(false);
+    }
+  }
+
+  function handleSelectPatron(e: React.ChangeEvent<HTMLSelectElement>) {
+    const sig = e.target.value;
+    if (sig) setForm((prev) => ({ ...prev, sku: sig }));
+    e.target.value = ""; // volver al placeholder del dropdown
+  }
+
+  /** Genera un código de barras REAL (EAN-13) escaneable. */
+  async function handleGenerarCodigoBarras() {
     if (generandoCodigo) return;
     setGenerandoCodigo(true);
     setErrorDuplicado(null);
     setErrorGeneral(null);
     try {
-      const res = await fetch("/api/productos/codigo-interno", {
-        method: "POST",
-        credentials: "include",
-      });
+      const res = await fetch("/api/productos/codigo-barras", { method: "POST", credentials: "include" });
       const json = await res.json();
       if (res.ok && json?.success && json.data?.codigo) {
         setForm((prev) => ({ ...prev, codigo_barras: json.data.codigo as string }));
-        setCodigoGeneradoInterno(true);
       } else {
-        setErrorGeneral(json?.error ?? "No se pudo generar el código.");
+        setErrorGeneral(json?.error ?? "No se pudo generar el código de barras.");
       }
     } catch (err) {
       setErrorGeneral(err instanceof Error ? err.message : "Error de red");
@@ -177,7 +225,6 @@ export default function NuevoProductoPage() {
   ) {
     setErrorDuplicado(null);
     setErrorGeneral(null);
-    if (e.target.name === "codigo_barras") setCodigoGeneradoInterno(false);
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   }
 
@@ -260,12 +307,8 @@ export default function NuevoProductoPage() {
       if (!nombreT) { showErr("El nombre es obligatorio."); return; }
       if (tipoGastro === "reventa" && !form.sku.trim()) { showErr("El SKU es obligatorio para productos de reventa."); return; }
 
+      // Código de barras: se guarda tal cual (escaneable). Vacío → null (sin barcode).
       const codigoEnInput = form.codigo_barras.trim();
-      const esIntManual = !!codigoEnInput && /^INT-/i.test(codigoEnInput) && !codigoGeneradoInterno;
-      if (esIntManual) {
-        showErr('El prefijo "INT-" está reservado para códigos internos generados por el sistema. Dejá el campo vacío y guardá, o usá el botón "Generar código interno".');
-        return;
-      }
 
       // Pre-chequeo duplicado tolerante a fallos de red.
       try {
@@ -278,26 +321,8 @@ export default function NuevoProductoPage() {
       } catch (err) {
         console.warn("[inventario/nuevo] productoExiste failed, ignorando:", err);
       }
-      // Resolver codigo: si vino del botón → ya está en el input con interno=true.
-      // Si el usuario escribió uno → manual (interno=false).
-      // Si está vacío → pedir uno interno al backend.
-      let codigo: string | null = codigoEnInput || null;
-      let interno = codigoGeneradoInterno && !!codigoEnInput;
-      if (!codigo) {
-        try {
-          const res = await fetch("/api/productos/codigo-interno", {
-            method: "POST",
-            credentials: "include",
-          });
-          const json = await res.json();
-          if (res.ok && json?.success && json.data?.codigo) {
-            codigo = json.data.codigo as string;
-            interno = true;
-          }
-        } catch {
-          codigo = null;
-        }
-      }
+      const codigo: string | null = codigoEnInput || null;
+      const interno = false; // ya no se autogeneran códigos internos; el barcode es real
 
       let guardado;
       try {
@@ -307,6 +332,9 @@ export default function NuevoProductoPage() {
           sku: form.sku.trim().toUpperCase(),
           costo_promedio: parseFloat(form.costo_promedio) || 0,
           precio_venta: parseFloat(form.precio_venta) || 0,
+          precio_mayorista: form.precio_mayorista.trim() !== "" ? parseFloat(form.precio_mayorista) || null : null,
+          precio_distribuidor: form.precio_distribuidor.trim() !== "" ? parseFloat(form.precio_distribuidor) || null : null,
+          cantidad_minima_mayorista: form.cantidad_minima_mayorista.trim() !== "" ? parseFloat(form.cantidad_minima_mayorista) || null : null,
           stock_actual: parseInt(form.stock_actual) || 0,
           stock_minimo: parseInt(form.stock_minimo) || 0,
           unidad_medida: form.unidad_medida.trim().toUpperCase(),
@@ -319,6 +347,11 @@ export default function NuevoProductoPage() {
           es_vendible: esVendible,
           es_insumo: esInsumo,
           controla_stock: controlaStock,
+          destacado: destacado,
+          discount_type: discountType || null,
+          discount_value: discountType ? Math.max(0, parseFloat(discountValue) || 0) : 0,
+          discount_starts_at: discountType && discountStartsAt ? new Date(discountStartsAt).toISOString() : null,
+          discount_ends_at: discountType && discountEndsAt ? new Date(discountEndsAt).toISOString() : null,
           valorizado: valorizado,
           unidad_compra: unidadCompra.trim() || null,
           unidad_receta: unidadReceta.trim() || null,
@@ -396,7 +429,8 @@ export default function NuevoProductoPage() {
             {
               tipo: "reventa" as const,
               titulo: "Producto de reventa",
-              icono: "🥤",
+              Icon: ShoppingBag,
+              iconColor: "text-sky-600",
               ejemplo: "Gaseosas, agua, jugos, postres comprados",
               descripcion: "Se compra y se vende tal cual. Controla stock y descuenta al vender.",
               acento: "border-sky-300 bg-sky-50/40 hover:border-sky-500",
@@ -404,7 +438,8 @@ export default function NuevoProductoPage() {
             {
               tipo: "menu" as const,
               titulo: "Producto del menú",
-              icono: "🍕",
+              Icon: ClipboardList,
+              iconColor: "text-amber-600",
               ejemplo: "Pizzas, lomitos, hamburguesas, combos",
               descripcion: "Producto preparado por el local. No descuenta stock directo (usá receta para costeo).",
               acento: "border-amber-300 bg-amber-50/40 hover:border-amber-500",
@@ -412,7 +447,8 @@ export default function NuevoProductoPage() {
             {
               tipo: "materia" as const,
               titulo: "Materia prima / insumo",
-              icono: "🌾",
+              Icon: Boxes,
+              iconColor: "text-emerald-600",
               ejemplo: "Harina, queso, salsa, carne, envases",
               descripcion: "Insumo para recetas. Sólo se usa para costear productos del menú.",
               acento: "border-emerald-300 bg-emerald-50/40 hover:border-emerald-500",
@@ -424,7 +460,7 @@ export default function NuevoProductoPage() {
               onClick={() => aplicarTipoGastro(opt.tipo)}
               className={`text-left rounded-xl border-2 ${opt.acento} p-5 transition-all hover:shadow-md`}
             >
-              <div className="text-3xl mb-2">{opt.icono}</div>
+              <opt.Icon className={`w-7 h-7 mb-2 ${opt.iconColor}`} />
               <div className="text-base font-semibold text-slate-900">{opt.titulo}</div>
               <div className="mt-1 text-xs italic text-slate-500">Ej: {opt.ejemplo}</div>
               <div className="mt-3 text-sm text-slate-700">{opt.descripcion}</div>
@@ -444,7 +480,8 @@ export default function NuevoProductoPage() {
     );
   }
 
-  const summary = TIPO_SUMMARY[tipoGastro];
+  // En ferreteria solo hay productos de reventa. La card resumen con la
+  // descripcion del tipo se oculta — no aporta y ocupa espacio.
   const showStock = tipoGastro === "reventa";
   const showPrecioVenta = tipoGastro !== "materia";
 
@@ -453,23 +490,6 @@ export default function NuevoProductoPage() {
 
       <div>
         <h1 className="text-3xl font-bold text-gray-800">Nuevo producto</h1>
-      </div>
-
-      <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-5 max-w-5xl">
-        <div className="flex items-start gap-4">
-          <div className="text-3xl">{summary.icono}</div>
-          <div className="flex-1 min-w-0">
-            <div className="text-base font-semibold text-slate-900">{summary.titulo}</div>
-            <div className="text-sm text-slate-600 mt-0.5">{summary.descripcion}</div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setTipoGastro(null)}
-            className="text-xs text-amber-700 hover:text-amber-900 underline shrink-0"
-          >
-            Cambiar tipo
-          </button>
-        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow p-6 max-w-5xl">
@@ -536,20 +556,43 @@ export default function NuevoProductoPage() {
           </div>
 
           {/* SKU + Unidad de medida */}
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div>
               <label className={labelClass}>
-                SKU{tipoGastro === "reventa" ? "" : <span className="text-xs font-normal text-gray-400 ml-1">(opcional)</span>}
+                SKU interno{tipoGastro === "reventa" ? "" : <span className="text-xs font-normal text-gray-400 ml-1">(opcional)</span>}
               </label>
-              <input
-                type="text"
-                name="sku"
-                value={form.sku}
-                onChange={handleChange}
-                placeholder="Ej: OOTD-001"
-                className={`${inputClass} uppercase`}
-                required={tipoGastro === "reventa"}
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  name="sku"
+                  value={form.sku}
+                  onChange={handleChange}
+                  placeholder="Ej: REV-0001"
+                  className={`${inputClass} uppercase flex-1`}
+                  required={tipoGastro === "reventa"}
+                />
+                <button
+                  type="button"
+                  onClick={handleGenerarSku}
+                  disabled={generandoSku}
+                  className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-[#3F8E91] hover:bg-[#4FAEB2]/5 disabled:opacity-50"
+                >
+                  {generandoSku ? "…" : "Generar SKU"}
+                </button>
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <select
+                  onChange={handleSelectPatron}
+                  defaultValue=""
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600 outline-none focus:ring-2 focus:ring-[#0EA5E9]"
+                >
+                  <option value="">Usar patrón existente…</option>
+                  {skuPatrones.map((p) => (
+                    <option key={p.prefix} value={p.siguiente}>{p.prefix} → {p.siguiente}</option>
+                  ))}
+                </select>
+                <span className="text-[11px] text-gray-400">Código interno editable. Podés ajustar el número final.</span>
+              </div>
             </div>
 
             <div className={tipoGastro === "menu" ? "hidden" : ""}>
@@ -568,39 +611,32 @@ export default function NuevoProductoPage() {
             </div>
           </div>
 
-          {/* Código de barras */}
-          <div>
-            <label className={labelClass}>
-              Código de barras
-              {codigoGeneradoInterno && form.codigo_barras && (
-                <span className="ml-2 align-middle text-[10px] uppercase tracking-wider bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded">
-                  Interno
-                </span>
-              )}
-            </label>
-            <input
-              type="text"
-              name="codigo_barras"
-              value={form.codigo_barras}
-              onChange={handleChange}
-              placeholder="Escaneá o escribí — dejá vacío para autogenerar"
-              className={inputClass}
-              autoComplete="off"
-            />
-            <div className="mt-2">
+          {/* Código de barras (escaneable, separado del SKU) */}
+          <div className="border-t border-slate-100 pt-5">
+            <label className={labelClass}>Código de barras</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                name="codigo_barras"
+                value={form.codigo_barras}
+                onChange={handleChange}
+                placeholder="Escaneá, escribí o generá (EAN-13)"
+                className={`${inputClass} flex-1`}
+                autoComplete="off"
+                inputMode="numeric"
+              />
               <button
                 type="button"
-                onClick={handleGenerarCodigoInterno}
+                onClick={handleGenerarCodigoBarras}
                 disabled={generandoCodigo}
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-sky-700 hover:text-sky-900 border border-sky-200 hover:bg-sky-50 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs font-medium text-sky-700 hover:bg-sky-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                  <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 0 1-9.201 2.466l-.312-.311h2.433a.75.75 0 0 0 0-1.5H3.989a.75.75 0 0 0-.75.75v4.242a.75.75 0 0 0 1.5 0v-2.43l.31.31a7 7 0 0 0 11.712-3.138.75.75 0 0 0-1.449-.39Zm1.23-3.723a.75.75 0 0 0 .219-.53V2.929a.75.75 0 0 0-1.5 0v2.431l-.31-.31A7 7 0 0 0 3.239 8.188a.75.75 0 1 0 1.448.389A5.5 5.5 0 0 1 13.89 6.11l.311.31h-2.432a.75.75 0 0 0 0 1.5h4.243a.75.75 0 0 0 .53-.219Z" clipRule="evenodd" />
-                </svg>
-                {generandoCodigo ? "Generando..." : "Generar código interno"}
+                {generandoCodigo ? "Generando…" : "Generar código de barras"}
               </button>
-              <span className="ml-2 text-xs text-gray-400">(opcional)</span>
             </div>
+            <p className="mt-1.5 text-xs text-gray-400">
+              Código escaneable para lector o etiqueta (EAN-13). Debe ser único. <span className="italic">(opcional)</span>
+            </p>
           </div>
 
           {/* Imagen del producto */}
@@ -648,15 +684,15 @@ export default function NuevoProductoPage() {
             </div>
           </div>
 
-          {/* Costo + Markup + Precio — bloque reactivo */}
+          {/* Costo (+ Markup + Precio en productos comerciales) — bloque reactivo */}
           <div>
             <p className="text-xs text-gray-400 mb-3 uppercase tracking-wide font-semibold">
-              Precios — los tres campos son reactivos entre sí
+              {showPrecioVenta ? "Precios — los tres campos son reactivos entre sí" : "Costo de adquisición"}
             </p>
-            <div className="grid grid-cols-3 gap-6">
+            <div className={`grid grid-cols-1 gap-6 ${showPrecioVenta ? "sm:grid-cols-3" : ""}`}>
 
               <div>
-                <label className={labelClass}>Costo promedio (Gs.)</label>
+                <label className={labelClass}>{showPrecioVenta ? "Costo promedio (Gs.)" : "Costo promedio / adquisición (Gs.)"}</label>
                 <MontoInput
                   value={form.costo_promedio}
                   onChange={handleCostoChange}
@@ -667,6 +703,7 @@ export default function NuevoProductoPage() {
                 />
               </div>
 
+              {showPrecioVenta && (
               <div>
                 <label className={labelClass}>Markup s/costo (%)</label>
                 <div className="relative">
@@ -685,6 +722,7 @@ export default function NuevoProductoPage() {
                 </div>
                 <p className="mt-1.5 text-xs text-gray-400">(precio − costo) / costo</p>
               </div>
+              )}
 
               <div className={showPrecioVenta ? "" : "hidden"}>
                 <label className={labelClass}>Precio de venta (Gs.)</label>
@@ -700,8 +738,48 @@ export default function NuevoProductoPage() {
 
             </div>
 
-            {/* Indicadores de rentabilidad en tiempo real */}
-            {tieneAmbos && markupCalc !== null && margenVentaCalc !== null && (
+            {showPrecioVenta && (
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className={labelClass}>Precio mayorista (Gs.) <span className="text-gray-400 font-normal">(opcional)</span></label>
+                  <MontoInput
+                    value={form.precio_mayorista}
+                    onChange={(n) => setForm((prev) => ({ ...prev, precio_mayorista: String(n) }))}
+                    placeholder="Ej: 22000"
+                    className={inputClass}
+                    decimals={false}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Cantidad mínima mayorista <span className="text-gray-400 font-normal">(opcional)</span></label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={form.cantidad_minima_mayorista}
+                    onChange={(e) => setForm((prev) => ({ ...prev, cantidad_minima_mayorista: e.target.value }))}
+                    placeholder="Ej: 10"
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Precio distribuidor (Gs.) <span className="text-gray-400 font-normal">(opcional)</span></label>
+                  <MontoInput
+                    value={form.precio_distribuidor}
+                    onChange={(n) => setForm((prev) => ({ ...prev, precio_distribuidor: String(n) }))}
+                    placeholder="Ej: 18000"
+                    className={inputClass}
+                    decimals={false}
+                  />
+                </div>
+                <p className="sm:col-span-2 text-xs text-gray-400">
+                  Precios por canal: en Ventas el cajero elige Minorista, Mayorista o Distribuidor. El precio distribuidor es comercial (no es el costo).
+                </p>
+              </div>
+            )}
+
+            {/* Indicadores de rentabilidad en tiempo real (no aplican a materia prima) */}
+            {showPrecioVenta && tieneAmbos && markupCalc !== null && margenVentaCalc !== null && (
               <div className="mt-4 space-y-3">
 
                 {/* Advertencia de pérdida */}
@@ -855,6 +933,137 @@ export default function NuevoProductoPage() {
               </p>
             </div>
 
+            {/* Control de stock — visible: define si el producto es inventariado */}
+            <div className="mt-5 pt-4 border-t border-gray-100">
+              <label className="inline-flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={controlaStock}
+                  onChange={(e) => setControlaStock(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                />
+                <span>
+                  <span className="font-medium">Controla stock / Producto inventariado</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">
+                    Si está activo, no se podrá vender sin stock suficiente. Desactivá esto para servicios o productos no inventariados (ej. mano de obra, corte).
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            {/* Descuento promocional (oferta) — oculto: solo aplicaba al sitio publico */}
+            <div className="hidden mt-5 pt-4 border-t border-gray-100">
+              <p className="text-xs uppercase tracking-wide font-semibold text-gray-500 mb-3">
+                Descuento promocional
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-gray-700 mb-1">Tipo de descuento</label>
+                  <select
+                    value={discountType}
+                    onChange={(e) => setDiscountType(e.target.value as "" | "percentage" | "fixed")}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                  >
+                    <option value="">Sin descuento</option>
+                    <option value="percentage">Por porcentaje</option>
+                    <option value="fixed">Monto fijo (Gs.)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-700 mb-1">
+                    Valor {discountType === "percentage" ? "(%)" : discountType === "fixed" ? "(Gs.)" : ""}
+                  </label>
+                  <input
+                    type="number"
+                    inputMode={discountType === "percentage" ? "decimal" : "numeric"}
+                    min="0"
+                    step={discountType === "percentage" ? "0.5" : "100"}
+                    value={discountValue}
+                    onChange={(e) => setDiscountValue(e.target.value)}
+                    disabled={!discountType}
+                    placeholder={discountType === "percentage" ? "15" : discountType === "fixed" ? "5000" : "—"}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-700 mb-1">Inicio (opcional)</label>
+                  <input
+                    type="datetime-local"
+                    value={discountStartsAt}
+                    onChange={(e) => setDiscountStartsAt(e.target.value)}
+                    disabled={!discountType}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-700 mb-1">Fin (opcional)</label>
+                  <input
+                    type="datetime-local"
+                    value={discountEndsAt}
+                    onChange={(e) => setDiscountEndsAt(e.target.value)}
+                    disabled={!discountType}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400"
+                  />
+                </div>
+              </div>
+              {/* Vista previa del precio con descuento aplicado */}
+              {(() => {
+                const base = parseFloat(form.precio_venta) || 0;
+                const val = parseFloat(discountValue) || 0;
+                const active = !!discountType && val > 0 && base > 0;
+                let final = base;
+                if (active) {
+                  if (discountType === "percentage") final = base - (base * val) / 100;
+                  else final = base - val;
+                  final = Math.max(0, Math.round(final));
+                }
+                const ahorro = Math.max(0, base - final);
+                const pct = base > 0 ? Math.round((ahorro / base) * 100) : 0;
+                const fmt = (n: number) => `Gs. ${Math.round(n).toLocaleString("es-PY")}`;
+                return (
+                  <div className="mt-4 rounded-xl border border-amber-200/70 bg-gradient-to-br from-amber-50/60 to-orange-50/30 p-4">
+                    <p className="text-[10.5px] uppercase tracking-wider font-bold text-amber-700 mb-3">
+                      Vista previa del precio
+                    </p>
+                    {active ? (
+                      <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+                        <div>
+                          <p className="text-[10.5px] uppercase tracking-wider text-slate-500 mb-0.5">
+                            Precio base
+                          </p>
+                          <p className="text-sm font-medium text-slate-500 line-through tabular-nums">
+                            {fmt(base)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10.5px] uppercase tracking-wider text-slate-500 mb-0.5">
+                            Precio final
+                          </p>
+                          <p className="text-2xl font-bold tabular-nums text-amber-700">
+                            {fmt(final)}
+                          </p>
+                        </div>
+                        <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
+                          <span>↓ {pct}%</span>
+                          <span className="text-emerald-600">·</span>
+                          <span>Ahorra {fmt(ahorro)}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500">
+                        {base <= 0
+                          ? "Cargá un precio de venta arriba para ver el cálculo."
+                          : "Elegí un tipo de descuento y un valor para ver el precio final."}
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+              <p className="mt-2 text-xs text-gray-500">
+                Si dejás las fechas vacías, el descuento es indefinido. Aparece en la sección &quot;Ofertas&quot; del home con badge -X%.
+              </p>
+            </div>
+
             {/* Configuración gastronómica — oculta (campos técnicos no necesarios en UX gastro simplificada) */}
             <div className="hidden mt-5 pt-4 border-t border-gray-100">
               <p className="text-xs uppercase tracking-wide font-semibold text-gray-500 mb-3">
@@ -930,7 +1139,7 @@ export default function NuevoProductoPage() {
 
           {/* Stock actual + Stock mínimo — solo para Reventa (Menú/Materia no controlan stock en UX simple) */}
           <div className={showStock ? "" : "hidden"}>
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div>
                 <label className={labelClass}>Stock actual</label>
                 <input

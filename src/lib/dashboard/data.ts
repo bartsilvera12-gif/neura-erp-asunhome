@@ -94,6 +94,11 @@ export interface CompraRaw {
   producto_id?: number | string;
   producto_nombre: string;
   proveedor_nombre: string;
+  proveedor_id?: string | null;
+  numero_control?: string | null;
+  tipo_pago?: "contado" | "credito" | string | null;
+  plazo_dias?: number | null;
+  anulada_at?: string | null;
   total: number;
   fecha: string;
 }
@@ -256,8 +261,6 @@ async function fetchProspectos(): Promise<ProspectoRaw[]> {
  * No depende del cliente browser + RLS en esquemas `erp_*`.
  */
 export async function getDashboardData(): Promise<DashboardData> {
-  const prospectos = await fetchProspectos();
-
   let clientes: ClienteRaw[] = [];
   let facturas: FacturaRaw[] = [];
   let pagos: PagoRaw[] = [];
@@ -271,9 +274,12 @@ export async function getDashboardData(): Promise<DashboardData> {
   let montoPerdidoBajasMes = 0;
   let notasCredito: NotaCreditoDashRow[] = [];
 
+  // En SSR no podemos hacer fetchWithSupabaseSession (necesita session de localStorage),
+  // ASI QUE TAMPOCO TIENE SENTIDO llamar a fetchProspectos. Antes se llamaba
+  // siempre (incluso en server) y el resultado se descartaba — round-trip perdido.
   if (typeof window === "undefined") {
     return {
-      prospectos,
+      prospectos: [],
       clientes,
       facturas,
       pagos,
@@ -309,11 +315,28 @@ export async function getDashboardData(): Promise<DashboardData> {
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   const dashboardRangeQs = `?desde=${fmtYmd(dashboardDesde)}&hasta=${fmtYmd(dashboardNow)}`;
 
+  // ANTES: await fetchProspectos() corria PRIMERO de forma serial, despues
+  // arrancaba el fetch de tenant-tables. Total = t_prospectos + t_tenant.
+  // AHORA: ambos corren en paralelo. Total = max(t_prospectos, t_tenant).
+  // Ahorro tipico: 200-500ms en cada apertura del dashboard.
+  // Cada fetch tiene su propio .catch para que si uno falla, el otro siga vivo
+  // (sin .catch, una falla rechaza el Promise.all y perdemos los dos datos).
+  const [prospectos, resTenantTablesResult] = await Promise.all([
+    fetchProspectos().catch((e): ProspectoRaw[] => {
+      console.warn("[getDashboardData] fetchProspectos falló:", e);
+      return [];
+    }),
+    fetchWithSupabaseSession(`/api/dashboard/tenant-tables${dashboardRangeQs}`, {
+      cache: "no-store",
+    }).catch((e: unknown): Response | null => {
+      console.warn("[getDashboardData] fetch tenant-tables fallo:", e);
+      return null;
+    }),
+  ]);
+
   try {
-    const res = await fetchWithSupabaseSession(
-      `/api/dashboard/tenant-tables${dashboardRangeQs}`,
-      { cache: "no-store" }
-    );
+    const res = resTenantTablesResult;
+    if (!res) throw new Error("tenant-tables fetch fallo (network)");
     if (!res.ok) throw new Error(await res.text());
     const json = (await res.json()) as {
       success?: boolean;
@@ -436,7 +459,13 @@ export async function getDashboardData(): Promise<DashboardData> {
       itemsByVenta.set(ventaId, lineas);
     }
 
-    ventas = (d.ventas ?? []).map((r: Record<string, unknown>) => {
+    ventas = (d.ventas ?? [])
+      // Filtrar ventas anuladas o totalmente devueltas: no deben afectar KPIs del dashboard.
+      .filter((r: Record<string, unknown>) => {
+        const e = String(r.estado ?? "");
+        return e !== "anulada" && e !== "devuelta_total";
+      })
+      .map((r: Record<string, unknown>) => {
       const id = r.id as string;
       return {
         id,
@@ -452,11 +481,19 @@ export async function getDashboardData(): Promise<DashboardData> {
       };
     });
 
-    compras = (d.compras ?? []).map((r: Record<string, unknown>) => ({
+    compras = (d.compras ?? [])
+      // Excluye compras anuladas de los KPIs de compras.
+      .filter((r: Record<string, unknown>) => r.anulada_at == null)
+      .map((r: Record<string, unknown>) => ({
       id: r.id as string,
       producto_id: r.producto_id as string | undefined,
       producto_nombre: (r.producto_nombre as string) ?? "",
       proveedor_nombre: (r.proveedor_nombre as string) ?? "",
+      proveedor_id: (r.proveedor_id as string | null) ?? null,
+      numero_control: (r.numero_control as string | null) ?? null,
+      tipo_pago: (r.tipo_pago as string | null) ?? null,
+      plazo_dias: r.plazo_dias == null ? null : Number(r.plazo_dias) || null,
+      anulada_at: (r.anulada_at as string | null) ?? null,
       total: toNum(r.total),
       fecha: toCalendarDateStr(r.fecha as string),
     }));

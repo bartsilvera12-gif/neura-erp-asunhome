@@ -9,6 +9,16 @@ interface CompraApiRow {
   precio_venta: string | number; margen_venta: string | number | null;
   tipo_pago: string; plazo_dias: number | null; nro_timbrado: string; estado: string;
   fecha: string;
+  numero_factura?: string | null;
+  fecha_factura?: string | null;
+  observacion?: string | null;
+  orden_compra_numero?: string | null;
+  orden_compra_item_id?: string | null;
+  comprobante_storage_path?: string | null;
+  comprobante_nombre?: string | null;
+  comprobante_mime_type?: string | null;
+  anulada_at?: string | null;
+  anulada_motivo?: string | null;
 }
 
 function mapRow(r: CompraApiRow): Compra {
@@ -33,6 +43,16 @@ function mapRow(r: CompraApiRow): Compra {
     tipo_pago: r.tipo_pago as Compra["tipo_pago"],
     plazo_dias: r.plazo_dias ?? undefined,
     nro_timbrado: r.nro_timbrado,
+    numero_factura: r.numero_factura ?? null,
+    fecha_factura: r.fecha_factura ?? null,
+    observacion: r.observacion ?? null,
+    orden_compra_numero: r.orden_compra_numero ?? null,
+    orden_compra_item_id: r.orden_compra_item_id ?? null,
+    comprobante_storage_path: r.comprobante_storage_path ?? null,
+    comprobante_nombre: r.comprobante_nombre ?? null,
+    comprobante_mime_type: r.comprobante_mime_type ?? null,
+    anulada_at: r.anulada_at ?? null,
+    anulada_motivo: r.anulada_motivo ?? null,
     fecha: r.fecha,
   };
 }
@@ -61,6 +81,105 @@ export interface SaveCompraResult {
 export interface SaveCompraError {
   success: false;
   error: string;
+}
+
+// ── Compra multiproducto ────────────────────────────────────────────────────
+
+export interface CompraItemPayload {
+  producto_id: string;
+  producto_nombre: string;
+  cantidad: number;
+  costo_unitario: number;
+  costo_unitario_original: number;
+  iva_tipo: string;
+  subtotal: number;
+  monto_iva: number;
+  total: number;
+  precio_venta: number;
+  margen_venta: number | null;
+}
+export interface CompraHeaderPayload {
+  proveedor_id: string;
+  proveedor_nombre: string;
+  moneda: "PYG" | "USD";
+  tipo_cambio: number;
+  tipo_pago: "contado" | "credito";
+  plazo_dias?: number;
+  nro_timbrado: string;
+  numero_factura?: string | null;
+  fecha_factura?: string | null;
+  fecha?: string | null;
+  orden_compra_numero?: string | null;
+  comprobante_storage_path?: string | null;
+  comprobante_nombre?: string | null;
+  comprobante_mime_type?: string | null;
+  descuenta_caja?: boolean;
+}
+
+export interface UploadComprobanteResult {
+  comprobante_storage_path: string;
+  comprobante_nombre: string;
+  comprobante_mime_type: string;
+}
+
+/** Sube el comprobante (imagen/PDF) y devuelve su referencia para asociarla a la compra. */
+export async function uploadComprobante(
+  file: File
+): Promise<{ ok: true; data: UploadComprobanteResult } | { ok: false; error: string }> {
+  try {
+    const fd = new FormData();
+    fd.append("file", file);
+    const r = await fetch("/api/compras/comprobante/upload", {
+      method: "POST",
+      credentials: "include",
+      body: fd,
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j?.success) {
+      return { ok: false, error: (j as { error?: string })?.error ?? `Error ${r.status} al subir el comprobante.` };
+    }
+    return { ok: true, data: j.data as UploadComprobanteResult };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Error de red al subir el comprobante." };
+  }
+}
+export interface SaveComprasMultiResult {
+  success: true;
+  numero_control: string;
+  compras: Compra[];
+  warning?: string | null;
+}
+
+/** Guarda una compra con N líneas (un solo numero_control). */
+export async function saveCompraMulti(
+  header: CompraHeaderPayload,
+  items: CompraItemPayload[]
+): Promise<SaveComprasMultiResult | SaveCompraError> {
+  try {
+    const r = await fetch("/api/compras", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...header, items }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j?.success) {
+      const err = (j as { error?: string })?.error ?? `Error ${r.status} al guardar la compra.`;
+      console.error("[compras] saveCompraMulti:", err);
+      return { success: false, error: err };
+    }
+    const data = j.data as { numero_control?: string; compras?: CompraApiRow[]; warning?: string | null };
+    return {
+      success: true,
+      numero_control: data.numero_control ?? "",
+      compras: (data.compras ?? []).map(mapRow),
+      warning: data.warning ?? null,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Error de red";
+    console.error("[compras] saveCompraMulti:", e);
+    return { success: false, error: msg };
+  }
 }
 
 export async function saveCompra(

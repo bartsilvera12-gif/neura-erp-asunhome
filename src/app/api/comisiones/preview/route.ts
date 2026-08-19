@@ -40,6 +40,15 @@ type LineaPreview = {
 
 const PAGE = 800;
 
+/**
+ * Tope de seguridad para los `for (let from = 0; ; from += PAGE)` que recorren
+ * tablas paginando 800 filas. Si una tabla supera 200 * 800 = 160k filas, asumimos
+ * algo se rompio (cliente con un periodo gigante, query mal armada, loop infinito
+ * por bug en backend de paginacion). Mejor fallar rapido con mensaje claro que
+ * colgar el request indefinidamente y bloquear el pool.
+ */
+const MAX_PAGES = 200;
+
 const ALERTA_NC_OMITIDA =
   "No se pudieron considerar notas de crédito en esta preview para este schema. El neto de factura se calcula sin descontar NC.";
 
@@ -59,7 +68,13 @@ async function cargarNcAprobadasPorFacturaId(
 ): Promise<{ ncMap: Map<string, number>; alertaNetoSinNc?: string }> {
   const ncRowsRaw: Record<string, unknown>[] = [];
   try {
+    let pageCount = 0;
     for (let from = 0; ; from += PAGE) {
+      if (++pageCount > MAX_PAGES) {
+        // Guard de seguridad: no consumir el pool por un loop infinito o tabla
+        // exageradamente grande. 200 paginas * 800 filas = 160k filas tope.
+        throw new Error(`MAX_PAGES (${MAX_PAGES}) excedido en nota_credito (empresa ${empresaId.slice(0, 8)})`);
+      }
       const { data, error } = await sb
         .from("nota_credito")
         .select("factura_id, monto, estado_erp")
@@ -290,16 +305,22 @@ export async function GET(request: Request) {
     const hastaYmd = period.fechaFinLocal;
 
     const clientesRows: Record<string, unknown>[] = [];
-    for (let from = 0; ; from += PAGE) {
-      const { data, error } = await sb
-        .from("clientes")
-        .select("id, empresa, nombre_contacto, vendedor_usuario_id")
-        .eq("empresa_id", empresaId)
-        .range(from, from + PAGE - 1);
-      if (error) throw new Error(error.message);
-      const chunk = data ?? [];
-      clientesRows.push(...chunk);
-      if (chunk.length < PAGE) break;
+    {
+      let pageCount = 0;
+      for (let from = 0; ; from += PAGE) {
+        if (++pageCount > MAX_PAGES) {
+          throw new Error(`MAX_PAGES (${MAX_PAGES}) excedido en clientes (empresa ${empresaId.slice(0, 8)})`);
+        }
+        const { data, error } = await sb
+          .from("clientes")
+          .select("id, empresa, nombre_contacto, vendedor_usuario_id")
+          .eq("empresa_id", empresaId)
+          .range(from, from + PAGE - 1);
+        if (error) throw new Error(error.message);
+        const chunk = data ?? [];
+        clientesRows.push(...chunk);
+        if (chunk.length < PAGE) break;
+      }
     }
 
     const clienteNombre = new Map<string, string>();
@@ -346,18 +367,24 @@ export async function GET(request: Request) {
 
     if (baseCalculo === "pago_registrado") {
       const pagos: Record<string, unknown>[] = [];
-      for (let from = 0; ; from += PAGE) {
-        const { data, error } = await sb
-          .from("pagos")
-          .select("id, factura_id, monto, fecha_pago")
-          .eq("empresa_id", empresaId)
-          .gte("fecha_pago", desdeYmd)
-          .lte("fecha_pago", hastaYmd)
-          .range(from, from + PAGE - 1);
-        if (error) throw new Error(error.message);
-        const chunk = data ?? [];
-        pagos.push(...chunk);
-        if (chunk.length < PAGE) break;
+      {
+        let pageCount = 0;
+        for (let from = 0; ; from += PAGE) {
+          if (++pageCount > MAX_PAGES) {
+            throw new Error(`MAX_PAGES (${MAX_PAGES}) excedido en pagos (empresa ${empresaId.slice(0, 8)}, periodo ${desdeYmd}..${hastaYmd})`);
+          }
+          const { data, error } = await sb
+            .from("pagos")
+            .select("id, factura_id, monto, fecha_pago")
+            .eq("empresa_id", empresaId)
+            .gte("fecha_pago", desdeYmd)
+            .lte("fecha_pago", hastaYmd)
+            .range(from, from + PAGE - 1);
+          if (error) throw new Error(error.message);
+          const chunk = data ?? [];
+          pagos.push(...chunk);
+          if (chunk.length < PAGE) break;
+        }
       }
 
       const facturaIds = [...new Set(pagos.map((p) => String(p.factura_id ?? "")).filter(Boolean))];
@@ -403,7 +430,11 @@ export async function GET(request: Request) {
       }
     } else if (baseCalculo === "factura_emitida") {
       const facturas: Record<string, unknown>[] = [];
+      let pageCountF = 0;
       for (let from = 0; ; from += PAGE) {
+        if (++pageCountF > MAX_PAGES) {
+          throw new Error(`MAX_PAGES (${MAX_PAGES}) excedido en facturas (empresa ${empresaId.slice(0, 8)}, periodo ${desdeYmd}..${hastaYmd})`);
+        }
         const { data, error } = await sb
           .from("facturas")
           .select("*")
@@ -467,7 +498,11 @@ export async function GET(request: Request) {
       }
     } else if (baseCalculo === "factura_pagada") {
       const pagosHist: Record<string, unknown>[] = [];
+      let pageCountPH = 0;
       for (let from = 0; ; from += PAGE) {
+        if (++pageCountPH > MAX_PAGES) {
+          throw new Error(`MAX_PAGES (${MAX_PAGES}) excedido en pagosHist (empresa ${empresaId.slice(0, 8)})`);
+        }
         const { data, error } = await sb
           .from("pagos")
           .select("factura_id, fecha_pago, monto")

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
@@ -16,10 +16,9 @@ import {
   Building2,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   Star,
   Sparkles,
-  PanelLeftClose,
-  PanelLeft,
   Search,
   Receipt,
   Megaphone,
@@ -29,11 +28,12 @@ import {
   History,
   Activity,
   ScrollText,
-  ListChecks,
-  FolderKanban,
   Percent,
   ChefHat,
   Utensils,
+  BarChart3,
+  Wallet,
+  Banknote,
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
@@ -44,7 +44,7 @@ import type { ModuloEmpresa } from "@/lib/empresas/actions";
 import { getFavoritos, toggleFavorito } from "@/lib/favorites";
 import { canAccessSidebarSlug } from "@/lib/modulos/route-slug-map";
 import { useBoot } from "@/components/BootContext";
-import { getModuleAccessCached } from "@/lib/modulos/module-access-cache";
+import { getModuleAccessCached, peekModuleAccessCache } from "@/lib/modulos/module-access-cache";
 
 type MenuItem = {
   key: string;
@@ -87,49 +87,51 @@ function adminEmpresasMatchesQuery(queryRaw: string): boolean {
 
 const MENU_STRUCTURE: MenuItem[] = [
   { key: "dashboard", slug: "dashboard", label: "Dashboard", href: "/", icon: LayoutDashboard },
-  {
-    key: "conversaciones",
-    slug: "conversaciones",
-    label: "Conversaciones",
-    href: "/dashboard/conversaciones",
-    icon: MessageCircle,
-  },
-  {
-    key: "historial-omnicanal",
-    slug: "historial-omnicanal",
-    label: "Historial omnicanal",
-    href: "/dashboard/historial-omnicanal",
-    icon: History,
-  },
-  {
-    key: "conversaciones-finalizadas",
-    slug: "conversaciones-finalizadas",
-    label: "Finalizadas",
-    href: "/dashboard/conversaciones-finalizadas",
-    icon: ListChecks,
-  },
-  {
-    key: "monitoreo",
-    slug: "monitoreo",
-    label: "Monitoreo",
-    href: "/dashboard/monitoreo",
-    icon: Activity,
-  },
-  { key: "ventas", slug: "ventas", label: "Ventas", href: "/ventas", icon: ShoppingCart },
-  {
-    key: "proyectos",
-    slug: "proyectos",
-    label: "Pedidos",
-    href: "/dashboard/proyectos",
-    icon: Utensils,
-  },
-  { key: "recetas", slug: "recetas", label: "Recetas", href: "/dashboard/recetas", icon: ChefHat },
+  // Modulo omnicanal/WhatsApp ocultado por ahora (codigo conservado por si se reactiva):
+  // - Conversaciones, Historial omnicanal, Finalizadas, Monitoreo
+  // {
+  //   key: "conversaciones", slug: "conversaciones", label: "Conversaciones",
+  //   href: "/dashboard/conversaciones", icon: MessageCircle,
+  // },
+  // {
+  //   key: "historial-omnicanal", slug: "historial-omnicanal", label: "Historial omnicanal",
+  //   href: "/dashboard/historial-omnicanal", icon: History,
+  // },
+  // {
+  //   key: "conversaciones-finalizadas", slug: "conversaciones-finalizadas", label: "Finalizadas",
+  //   href: "/dashboard/conversaciones-finalizadas", icon: ListChecks,
+  // },
+  // {
+  //   key: "monitoreo", slug: "monitoreo", label: "Monitoreo",
+  //   href: "/dashboard/monitoreo", icon: Activity,
+  // },
+  { key: "ventas", slug: "ventas", label: "Caja", href: "/ventas", icon: ShoppingCart },
+  // Pedidos: vendedor arma pedidos en el salon; este listado es gestion
+  // (ver/editar/cancelar). El cobro se hace desde la Caja (/ventas), que
+  // muestra el listado "Pedidos por cobrar" embebido. Slug 'ventas' para
+  // heredar acceso del modulo. La ruta vieja /consulta redirige a /pedidos.
+  // Pedidos oculto para Ferrecolor: flujo pensado para salon/restaurante,
+  // no aplica en venta mostrador. La ruta /pedidos sigue existiendo por URL.
+  // { key: "pedidos", slug: "ventas", label: "Pedidos", href: "/pedidos", icon: Receipt },
+  // Presupuestos: cotizaciones al cliente con PDF (logo + membrete Ferreteria
+  // Republica). Reactivado a pedido.
+  { key: "presupuestos", slug: "presupuestos", label: "Presupuestos", href: "/presupuestos", icon: FileText },
+  // Items gastro/legacy ocultados para ferreteria (codigo conservado por si se reactivan):
+  // - Pedidos (proyectos): kanban de cocina, no aplica.
+  // - Recetas: combos/insumos, no aplica.
+  // {
+  //   key: "proyectos", slug: "proyectos", label: "Pedidos",
+  //   href: "/dashboard/proyectos", icon: Utensils,
+  // },
+  // { key: "recetas", slug: "recetas", label: "Recetas", href: "/dashboard/recetas", icon: ChefHat },
   { key: "inventario", slug: "inventario", label: "Inventario", href: "/inventario", icon: Package, children: [
     { label: "Productos", href: "/inventario" },
     { label: "Movimientos", href: "/inventario/movimientos" },
     { label: "Categorías", href: "/inventario/categorias" },
-    // "Depósitos / Ubicaciones" oculto en instancia En lo de Mari (no aplica para gastronomía).
+    // Depósitos / Ubicaciones oculto para Ferrecolor (no aplica).
+    // { label: "Depósitos / Ubicaciones", href: "/inventario/ubicaciones" },
   ]},
+  // Clientes: reactivado para que el modulo Consulta pueda asociar pedidos.
   { key: "clientes", slug: "clientes", label: "Clientes", href: "/clientes", icon: Users },
   {
     key: "compras",
@@ -142,17 +144,28 @@ const MENU_STRUCTURE: MenuItem[] = [
       { label: "Proveedores", href: "/proveedores" },
     ],
   },
+  { key: "pagos", slug: "pagos", label: "Pagos", href: "/pagos", icon: Banknote },
   { key: "gastos", slug: "gastos", label: "Gastos", href: "/gastos", icon: Receipt },
+  // Otros ingresos: ingresos manuales que NO son ventas de productos (cartones,
+  // servicios, alquileres). Suman a caja, no tocan inventario. Slug 'ventas'
+  // para heredar acceso (mismo permiso que Caja).
+  { key: "otros_ingresos", slug: "ventas", label: "Otros ingresos", href: "/otros-ingresos", icon: Wallet },
+  // Entidades bancarias: cajas, bancos, tarjetas, billeteras usadas para
+  // conciliacion de transferencias y tarjetas en cobros/ventas. Era submenu
+  // de Configuracion; ahora modulo standalone para mejor accesibilidad.
+  { key: "entidades_bancarias", slug: "ventas", label: "Entidades bancarias", href: "/configuracion/entidades-bancarias", icon: Building2 },
+  { key: "reportes", slug: "reportes", label: "Reportes", href: "/reportes", icon: BarChart3 },
   // Pagos oculto en instancia En lo de Mari (no usa este módulo).
+  // Comisiones y Notas de credito ocultos por ahora:
   { key: "comisiones", slug: "comisiones", label: "Comisiones", href: "/comisiones", icon: Percent },
-  {
-    key: "notas_credito",
-    slug: "notas_credito",
-    label: "Notas de crédito",
-    href: "/notas-credito",
-    icon: ScrollText,
-  },
-  { key: "usuarios", slug: "usuarios", label: "Usuarios", href: "/usuarios", icon: UserCog },
+  // {
+  //   key: "notas_credito", slug: "notas_credito", label: "Notas de crédito",
+  //   href: "/notas-credito", icon: ScrollText,
+  // },
+  // Usuarios oculto del sidebar (codigo conservado, ruta accesible por URL).
+  // { key: "usuarios", slug: "usuarios", label: "Usuarios", href: "/usuarios", icon: UserCog },
+  // Configuracion: reactivado a pedido. Da acceso al panel de facturacion
+  // (modo / autoimpresor) y demas subpaginas de configuracion.
   {
     key: "configuracion",
     slug: "configuracion",
@@ -164,26 +177,40 @@ const MENU_STRUCTURE: MenuItem[] = [
       { label: "Equipos y supervisión", href: "/configuracion/omnicanal-equipos" },
     ],
   },
-  { key: "planes", slug: "planes", label: "Planes", href: "/planes", icon: FileText },
-  { key: "gestion-clientes", slug: "gestion-clientes", label: "Gestión Clientes", href: "/gestion-clientes", icon: Users },
-  { key: "crm", slug: "crm", label: "CRM Funnel", href: "/crm", icon: Sparkles },
-  { key: "marketing", slug: "marketing", label: "Marketing Legacy", href: "/marketing", icon: Megaphone },
-  { key: "marketing_ops", slug: "marketing_ops", label: "Marketing Ops", href: "/dashboard/marketing-ops", icon: Megaphone },
-  {
-    key: "campanas",
-    slug: "campanas",
-    label: "Campañas",
-    href: "/dashboard/campanas",
-    icon: SendHorizontal,
-  },
-  {
-    key: "sorteos",
-    slug: "sorteos",
-    label: "Sorteos",
-    href: "/sorteos",
-    icon: Ticket,
-    children: [{ label: "Tickets / Comprobantes", href: "/sorteos/tickets", exactMatch: true }],
-  },
+  // Items ocultos en ferreteria (no aplican / duplicados):
+  // - Planes: suscripciones, modelo SaaS.
+  // - Gestion Clientes: duplicado de Clientes con vista distinta.
+  // - Marketing Legacy: reemplazado por Marketing Ops.
+  // { key: "planes", slug: "planes", label: "Planes", href: "/planes", icon: FileText },
+  // { key: "gestion-clientes", slug: "gestion-clientes", label: "Gestión Clientes", href: "/gestion-clientes", icon: Users },
+  // CRM, Marketing y Campanas ocultos por ahora:
+  // { key: "crm", slug: "crm", label: "CRM Funnel", href: "/crm", icon: Sparkles },
+  // { key: "marketing", slug: "marketing", label: "Marketing Legacy", href: "/marketing", icon: Megaphone },
+  // { key: "marketing_ops", slug: "marketing_ops", label: "Marketing Ops", href: "/dashboard/marketing-ops", icon: Megaphone },
+  // {
+  //   key: "campanas", slug: "campanas", label: "Campañas",
+  //   href: "/dashboard/campanas", icon: SendHorizontal,
+  // },
+  // Sorteos ocultado: modulo especifico, no aplica a la ferreteria por ahora.
+  // {
+  //   key: "sorteos", slug: "sorteos", label: "Sorteos", href: "/sorteos", icon: Ticket,
+  //   children: [{ label: "Tickets / Comprobantes", href: "/sorteos/tickets", exactMatch: true }],
+  // },
+];
+
+/**
+ * Agrupamiento VISUAL del menú por familias. Solo reordena/agrupa lo que ya existe en
+ * MENU_STRUCTURE; no cambia slugs, rutas, acceso ni permisos. Cada `keys` referencia
+ * `MenuItem.key`. Los ítems sin familia caen en "Otros" (no se ocultan).
+ */
+const MENU_FAMILIES: { id: string; titulo: string; keys: string[] }[] = [
+  { id: "inicio", titulo: "Inicio", keys: ["dashboard"] },
+  { id: "comercial", titulo: "Comercial", keys: ["clientes", "crm", "gestion-clientes", "ventas", "presupuestos", "comisiones", "planes"] },
+  { id: "finanzas", titulo: "Finanzas", keys: ["pagos", "gastos", "otros_ingresos", "entidades_bancarias", "notas_credito", "reportes"] },
+  { id: "operaciones", titulo: "Operaciones", keys: ["inventario", "compras", "recetas", "proyectos"] },
+  { id: "omnicanal", titulo: "Omnicanal", keys: ["conversaciones", "conversaciones-finalizadas", "historial-omnicanal", "monitoreo", "campanas"] },
+  { id: "marketing", titulo: "Marketing y Automatización", keys: ["marketing", "marketing_ops", "sorteos"] },
+  { id: "administracion", titulo: "Administración", keys: ["usuarios", "configuracion"] },
 ];
 
 function modulosSyntheticFromMenu(): ModuloEmpresa[] {
@@ -325,9 +352,29 @@ function NavItem({
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const [modulos, setModulos] = useState<ModuloEmpresa[]>([]);
-  const [inactiveSlugsList, setInactiveSlugsList] = useState<string[]>([]);
-  const [strictAllowlist, setStrictAllowlist] = useState(false);
+  const navScrollRef = useRef<HTMLElement | null>(null);
+  const navContentRef = useRef<HTMLDivElement | null>(null);
+  const [scrollIndicator, setScrollIndicator] = useState({
+    visible: false,
+    thumbHeight: 0,
+    thumbTop: 0,
+  });
+  // ── Hidratación SÍNCRONA desde cache (localStorage) ───────────────────────
+  // Si hay cache válido del último login, arrancamos con módulos + cargando=false.
+  // Esto elimina el flash "Cargando…" cuando Chrome descarta la pestaña en
+  // background y la remonta al volver (tab discarding).
+  // El refetch en el useEffect de abajo sigue ocurriendo en background como
+  // stale-while-revalidate, pero sin ocultar el menú.
+  const cachedAccess = peekModuleAccessCache();
+  const [modulos, setModulos] = useState<ModuloEmpresa[]>(() =>
+    Array.isArray(cachedAccess?.modulos) ? cachedAccess!.modulos! : [],
+  );
+  const [inactiveSlugsList, setInactiveSlugsList] = useState<string[]>(() =>
+    Array.isArray(cachedAccess?.inactiveSlugs) ? cachedAccess!.inactiveSlugs! : [],
+  );
+  const [strictAllowlist, setStrictAllowlist] = useState<boolean>(
+    !!cachedAccess?.strictAllowlist,
+  );
   const [favoritos, setFavoritos] = useState<string[]>([]);
   const [collapsed, setCollapsed] = useState(false);
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({
@@ -335,11 +382,48 @@ export default function Sidebar() {
     sorteos: true,
     compras: true,
   });
-  const [cargando, setCargando] = useState(true);
-  const [esSuperAdmin, setEsSuperAdmin] = useState(false);
+  // Familias del menú colapsables (agrupamiento visual). Abiertas por defecto.
+  const [expandedFamilies, setExpandedFamilies] = useState<Record<string, boolean>>({});
+  // cargando arranca en false si ya hidratamos desde cache; el spinner solo
+  // aparece en el primer login real, no al volver a la pestaña.
+  const [cargando, setCargando] = useState<boolean>(
+    !(cachedAccess && (cachedAccess.modulos?.length || cachedAccess.slugs?.length)),
+  );
+  const [esSuperAdmin, setEsSuperAdmin] = useState<boolean>(!!cachedAccess?.superAdmin);
   /** Filtro visual del menú (no altera permisos ni rutas). */
   const [menuSearchQuery, setMenuSearchQuery] = useState("");
   const { setSidebarReady, mobileSidebarOpen, setMobileSidebarOpen } = useBoot();
+
+  const updateScrollIndicator = useCallback(() => {
+    const el = navScrollRef.current;
+    if (!el) return;
+
+    const scrollable = el.scrollHeight > el.clientHeight + 1;
+    if (!scrollable) {
+      setScrollIndicator((prev) =>
+        prev.visible ? { visible: false, thumbHeight: 0, thumbTop: 0 } : prev
+      );
+      return;
+    }
+
+    const trackHeight = Math.max(el.clientHeight - 20, 1);
+    const thumbHeight = Math.max(36, (el.clientHeight / el.scrollHeight) * trackHeight);
+    const maxThumbTop = Math.max(trackHeight - thumbHeight, 0);
+    const maxScrollTop = Math.max(el.scrollHeight - el.clientHeight, 1);
+    const thumbTop = (el.scrollTop / maxScrollTop) * maxThumbTop;
+
+    setScrollIndicator((prev) => {
+      const next = { visible: true, thumbHeight, thumbTop };
+      if (
+        prev.visible === next.visible &&
+        Math.abs(prev.thumbHeight - next.thumbHeight) < 0.5 &&
+        Math.abs(prev.thumbTop - next.thumbTop) < 0.5
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, []);
 
   /** Cerrar el drawer mobile al cambiar de ruta. */
   useEffect(() => {
@@ -364,9 +448,17 @@ export default function Sidebar() {
   useEffect(() => {
     let cancelled = false;
 
-    async function cargarMenuDesdeSesion(session: Session | null) {
+    async function cargarMenuDesdeSesion(
+      session: Session | null,
+      opts?: { forceRefresh?: boolean },
+    ) {
       try {
-        setCargando(true);
+        // Stale-while-revalidate: solo mostramos "Cargando…" si NO tenemos
+        // módulos en estado. Si ya hay módulos (hidratados del cache o de un
+        // fetch previo), refrescamos en background sin ocultar el menú.
+        // Esto evita el flash de loader al volver a la pestaña o ante eventos
+        // SIGNED_IN/USER_UPDATED de Supabase que en realidad no cambian nada.
+        setCargando((prev) => (modulos.length === 0 ? true : prev));
         if (cancelled) return;
         if (!session?.user) {
           setModulos([]);
@@ -374,7 +466,9 @@ export default function Sidebar() {
           return;
         }
 
-        const { ok, data: body } = await getModuleAccessCached();
+        const { ok, data: body } = await getModuleAccessCached({
+          forceRefresh: opts?.forceRefresh,
+        });
         if (cancelled) return;
 
         let superA = false;
@@ -439,9 +533,21 @@ export default function Sidebar() {
       if (!cancelled) void cargarMenuDesdeSesion(session);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (cancelled) return;
-      void cargarMenuDesdeSesion(session);
+      // Skip eventos que NO cambian que modulos tiene el user:
+      //  - INITIAL_SESSION: ya cargado por el getSession() de arriba (duplicado).
+      //  - TOKEN_REFRESHED: Supabase refresca el JWT cada ~1h Y cuando la pestana
+      //    vuelve a estar visible. Los modulos del user no cambian por esto;
+      //    re-fetchear hace que el sidebar muestre "Cargando..." sin motivo
+      //    cada vez que el usuario vuelve a la tab del ERP.
+      // Eventos que SI re-cargan: SIGNED_IN, SIGNED_OUT, USER_UPDATED.
+      if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") return;
+      // SIGNED_IN puede significar usuario nuevo (sesión cambió) — forzamos
+      // refresh del cache para no servir módulos del usuario anterior.
+      // USER_UPDATED: cambió el JWT del mismo user (raro), también refrescamos.
+      const forceRefresh = event === "SIGNED_IN" || event === "USER_UPDATED";
+      void cargarMenuDesdeSesion(session, { forceRefresh });
     });
 
     return () => {
@@ -499,6 +605,28 @@ export default function Sidebar() {
     );
   }, [favoritos, menuSearchQuery, modulos, esSuperAdmin, inactiveSlugsSet, strictAllowlist]);
 
+  // Agrupar los ítems visibles del menú principal por familias (solo visual).
+  const seccionesMenu = useMemo(() => {
+    const byKey = new Map(mainItemsFiltered.map((it) => [it.key, it]));
+    const usados = new Set<string>();
+    const secciones: { id: string; titulo: string; items: MenuItem[] }[] = [];
+    for (const fam of MENU_FAMILIES) {
+      const items = fam.keys
+        .map((k) => byKey.get(k))
+        .filter((it): it is MenuItem => it !== undefined);
+      items.forEach((it) => usados.add(it.key));
+      if (items.length > 0) secciones.push({ id: fam.id, titulo: fam.titulo, items });
+    }
+    const otros = mainItemsFiltered.filter((it) => !usados.has(it.key));
+    if (otros.length > 0) secciones.push({ id: "otros", titulo: "Otros", items: otros });
+    return secciones;
+  }, [mainItemsFiltered]);
+
+  const familiaExpandida = (id: string) => expandedFamilies[id] ?? true; // abiertas por defecto
+  const toggleFamilia = (id: string) =>
+    setExpandedFamilies((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }));
+  const forzarExpandirFamilias = normalizeMenuSearch(menuSearchQuery).length > 0;
+
   const anyMenuVisible =
     favoritosItemsFiltered.length > 0 ||
     mainItemsFiltered.length > 0 ||
@@ -522,6 +650,27 @@ export default function Sidebar() {
     });
   }, [menuSearchQuery]);
 
+  useEffect(() => {
+    const el = navScrollRef.current;
+    if (!el) return;
+
+    updateScrollIndicator();
+    const observer = new ResizeObserver(updateScrollIndicator);
+    observer.observe(el);
+    if (navContentRef.current) observer.observe(navContentRef.current);
+    el.addEventListener("scroll", updateScrollIndicator, { passive: true });
+
+    return () => {
+      observer.disconnect();
+      el.removeEventListener("scroll", updateScrollIndicator);
+    };
+  }, [updateScrollIndicator]);
+
+  useEffect(() => {
+    const raf = window.requestAnimationFrame(updateScrollIndicator);
+    return () => window.cancelAnimationFrame(raf);
+  });
+
   return (
     <>
       {/* Backdrop mobile: cubre el contenido cuando el drawer esta abierto */}
@@ -530,29 +679,33 @@ export default function Sidebar() {
           type="button"
           aria-label="Cerrar menú"
           onClick={() => setMobileSidebarOpen(false)}
-          className="fixed inset-0 z-40 bg-slate-900/55 backdrop-blur-sm md:hidden"
+          className="fixed inset-0 z-40 bg-slate-900/55 backdrop-blur-sm lg:hidden"
         />
       ) : null}
 
-      <motion.aside
+      <aside
         id="neura-sidebar"
-        initial={false}
-        animate={{ width: collapsed ? 80 : 260 }}
-        transition={{ duration: 0.2 }}
-        className={`zentra-sidebar-bg flex h-svh min-h-0 shrink-0 flex-col border-r border-[color:var(--zentra-sidebar-border)] md:relative md:translate-x-0 ${
+        // Ancho animado por CSS puro (sin framer-motion para no cargar la lib
+        // en el bundle del shell). motion-safe respeta prefers-reduced-motion.
+        style={{ width: collapsed ? 80 : 260 }}
+        className={`zentra-sidebar-bg flex h-svh min-h-0 shrink-0 flex-col border-r border-[color:var(--zentra-sidebar-border)] motion-safe:transition-[width] motion-safe:duration-200 lg:relative lg:z-auto lg:translate-x-0 lg:shadow-none ${
           mobileSidebarOpen
             ? "fixed inset-y-0 left-0 z-50 translate-x-0 shadow-2xl transition-transform duration-200"
-            : "fixed inset-y-0 left-0 z-50 -translate-x-full md:translate-x-0 transition-transform duration-200"
+            : "fixed inset-y-0 left-0 z-50 -translate-x-full lg:translate-x-0 transition-transform duration-200"
         }`}
       >
-      {/* Logo oficial ZENTRA (blanco sobre azul marca) */}
-      <div className="flex h-[7.25rem] shrink-0 items-center justify-between gap-2 border-b border-[color:var(--zentra-sidebar-border)] bg-[color:var(--zentra-sidebar-elevated)]/35 px-3 py-2.5">
-        <Link href="/" className={`flex items-center justify-center min-w-0 flex-1 overflow-hidden`}>
+      {/* Logo: dos assets distintos segun estado.
+          - Expandido: /brand/zentra-logo-official.png (logo + texto ZENTRA)
+          - Colapsado: /brand/zentralogo.png (solo icono Z) -> queda nitido en 44x44
+          Header con justify-center porque el toggle ahora es una pestania
+          flotante en el borde derecho (estilo Coolify/acai-house). */}
+      <div className="flex h-[7.25rem] shrink-0 items-center justify-center gap-2 border-b border-[color:var(--zentra-sidebar-border)] bg-[color:var(--zentra-sidebar-elevated)]/35 px-3 py-2.5">
+        <Link href="/" className="flex items-center justify-center min-w-0 flex-1 overflow-hidden">
           <div
             className={`relative flex items-center justify-center ${collapsed ? "h-11 w-11" : "h-[4.5rem] w-full max-w-[200px]"}`}
           >
             <Image
-              src="/brand/zentra-logo-official.png"
+              src={collapsed ? "/brand/zentralogo.png" : "/brand/zentra-logo-official.png"}
               alt="ZENTRA"
               width={400}
               height={220}
@@ -562,15 +715,21 @@ export default function Sidebar() {
             />
           </div>
         </Link>
-        <button
-          type="button"
-          onClick={() => setCollapsed(!collapsed)}
-          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-[color:var(--zentra-sidebar-hover)] hover:text-white"
-          aria-label={collapsed ? "Expandir sidebar" : "Colapsar sidebar"}
-        >
-          {collapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
-        </button>
       </div>
+
+      {/* Toggle flotante estilo Coolify: pestaña circular en el borde derecho
+          del sidebar. Solo en desktop (lg+), donde el colapso a 80px aplica;
+          en mobile el sidebar es un drawer y no necesita pestaña. */}
+      <button
+        type="button"
+        onClick={() => setCollapsed(!collapsed)}
+        aria-label={collapsed ? "Expandir sidebar" : "Colapsar sidebar"}
+        title={collapsed ? "Expandir" : "Colapsar"}
+        style={{ backgroundColor: "#104A4E" }}
+        className="absolute top-[8rem] -right-3 z-50 hidden h-7 w-7 items-center justify-center rounded-full border border-[color:var(--zentra-sidebar-border)] text-white shadow-[0_4px_10px_rgba(0,0,0,0.35)] transition-transform hover:scale-105 lg:flex"
+      >
+        {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+      </button>
 
       {!collapsed && (
         <div className="shrink-0 border-b border-[color:var(--zentra-sidebar-border)] px-3 py-2.5">
@@ -595,7 +754,12 @@ export default function Sidebar() {
         </div>
       )}
 
-      <nav className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain p-3">
+      <div className="relative min-h-0 flex-1">
+      <nav
+        ref={navScrollRef}
+        className="zentra-sidebar-scroll h-full min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain p-3"
+      >
+        <div ref={navContentRef}>
         {showMenuNoResults ? (
           <p className="px-2 py-6 text-center text-xs text-slate-400">Sin resultados</p>
         ) : null}
@@ -623,15 +787,13 @@ export default function Sidebar() {
           </div>
         )}
 
-        {/* Menú principal */}
-        <div className="space-y-0.5">
-          {!collapsed && mainItemsFiltered.length > 0 && (
-            <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-slate-500">General</p>
-          )}
-          {cargando ? (
-            <div className="px-3 py-2 text-sm text-slate-500 animate-pulse">Cargando…</div>
-          ) : (
-            mainItemsFiltered.map((item) => (
+        {/* Menú principal agrupado por familias (solo visual) */}
+        {cargando ? (
+          <div className="px-3 py-2 text-sm text-slate-500 animate-pulse">Cargando…</div>
+        ) : collapsed ? (
+          // Colapsado (solo iconos): lista plana, sin títulos de familia.
+          <div className="space-y-0.5">
+            {mainItemsFiltered.map((item) => (
               <NavItem
                 key={item.key}
                 item={item}
@@ -644,9 +806,43 @@ export default function Sidebar() {
                 expanded={expandedItems[item.key] ?? false}
                 onToggleExpand={() => toggleExpand(item.key)}
               />
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          seccionesMenu.map((seccion) => {
+            const abierta = familiaExpandida(seccion.id) || forzarExpandirFamilias;
+            return (
+              <div key={seccion.id} className="mb-3">
+                <button
+                  type="button"
+                  onClick={() => toggleFamilia(seccion.id)}
+                  className="mb-1.5 flex w-full items-center justify-between rounded px-3 py-1.5 text-sm font-bold uppercase tracking-wide text-slate-100 transition-colors hover:text-white"
+                >
+                  <span>{seccion.titulo}</span>
+                  {abierta ? <ChevronDown className="h-4 w-4 text-slate-300" /> : <ChevronRight className="h-4 w-4 text-slate-300" />}
+                </button>
+                {abierta && (
+                  <div className="space-y-0.5">
+                    {seccion.items.map((item) => (
+                      <NavItem
+                        key={item.key}
+                        item={item}
+                        itemId={slugToId(item.slug)}
+                        isActive={isActive(item.slug, item.href)}
+                        isFavorito={favoritos.includes(slugToId(item.slug))}
+                        onToggleFavorito={handleToggleFavorito}
+                        hasAccess={hasAccess(item.slug)}
+                        collapsed={collapsed}
+                        expanded={expandedItems[item.key] ?? false}
+                        onToggleExpand={() => toggleExpand(item.key)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
 
         {/* Admin */}
         {esSuperAdmin && adminEmpresasMatchesQuery(menuSearchQuery) && (
@@ -667,8 +863,20 @@ export default function Sidebar() {
             </Link>
           </div>
         )}
+        </div>
       </nav>
-      </motion.aside>
+
+        {scrollIndicator.visible ? (
+          <div className="pointer-events-none absolute inset-y-2.5 right-1.5 w-1 rounded-full bg-white/[0.035]">
+            <motion.span
+              className="absolute left-0 top-0 block w-full rounded-full bg-[#4FAEB2]/55 shadow-[0_0_10px_rgba(79,174,178,0.32)]"
+              animate={{ height: scrollIndicator.thumbHeight, y: scrollIndicator.thumbTop }}
+              transition={{ type: "spring", stiffness: 420, damping: 38, mass: 0.35 }}
+            />
+          </div>
+        ) : null}
+      </div>
+      </aside>
     </>
   );
 }

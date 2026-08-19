@@ -20,11 +20,15 @@ export async function PATCH(
     if (body.descripcion !== undefined) patch.descripcion = normalizeUpperNullable(body.descripcion);
     if (body.parent_id !== undefined) patch.parent_id = body.parent_id == null ? null : String(body.parent_id);
     if (body.activo !== undefined) patch.activo = body.activo === true;
+    if (body.imagen_url !== undefined) {
+      const v = body.imagen_url == null ? null : String(body.imagen_url).trim();
+      patch.imagen_url = v && v.length > 0 ? v : null;
+    }
 
     if (Object.keys(patch).length === 0) {
       const { data, error } = await ctx.supabase
         .from("categorias_productos")
-        .select("id, empresa_id, nombre, codigo, descripcion, parent_id, activo, created_at, updated_at")
+        .select("id, empresa_id, nombre, codigo, descripcion, parent_id, activo, imagen_url, created_at, updated_at")
         .eq("empresa_id", ctx.auth.empresa_id)
         .eq("id", id)
         .maybeSingle();
@@ -38,7 +42,7 @@ export async function PATCH(
       .update(patch)
       .eq("empresa_id", ctx.auth.empresa_id)
       .eq("id", id)
-      .select("id, empresa_id, nombre, codigo, descripcion, parent_id, activo, created_at, updated_at")
+      .select("id, empresa_id, nombre, codigo, descripcion, parent_id, activo, imagen_url, created_at, updated_at")
       .maybeSingle();
     if (upd.error) {
       const msg = upd.error.message ?? "";

@@ -1,7 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { motion } from "framer-motion";
+import {
+  BarChart3, Wallet, Package, ShoppingCart, Truck,
+  Target, MessageCircle, CheckCircle2, TrendingUp,
+  Hash, AlertTriangle, Gem, Calendar, CalendarDays,
+  Receipt, Boxes, DollarSign,
+  type LucideIcon,
+} from "lucide-react";
+// MobileDashboard se renderiza solo en mobile (md:hidden). El dashboard desktop
+// que vive en este mismo archivo queda intacto.
+import MobileDashboard from "@/app/_components/MobileDashboard";
+import CobranzasResumenCards from "@/components/cobros/CobranzasResumenCards";
 import { getConfig } from "@/lib/config/storage";
 import { getUsuarios } from "@/lib/usuarios/storage";
 import type { ConfigGlobal } from "@/lib/config/types";
@@ -39,21 +51,21 @@ import {
   isDashboardTabSlug,
   type DashboardTabSlug,
 } from "@/lib/dashboard/resolve-effective-dashboard-views";
-// NOTA DE PERFORMANCE: recharts pesa ~90 KB gzipped y entra al bundle inicial.
-// No se puede usar next/dynamic directo en estos componentes porque LineChart
-// hace introspeccion de children por tipo (rompe si los envolves en dynamic()).
-// TODO: extraer el chart de la seccion financiera a un archivo aparte
-// (p.ej. src/app/_components/ChartCobradoPorDia.tsx) y dynamic-importar ESE archivo.
-// Eso saca recharts del bundle inicial sin romper la introspeccion.
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+// recharts (~90 KB gzipped) extraido a archivo aparte y dynamic-importado.
+// Razones:
+//  - El chart solo se ve cuando el user entra al tab "Financiero" del dashboard.
+//  - LineChart hace introspeccion de children por tipo — por eso NO se puede
+//    dynamic() directo a los componentes individuales (rompe los ejes).
+//    Solucion: dynamic() al chart completo como unidad cerrada.
+//  - ssr:false porque el chart no aporta SEO y evita un round-trip server.
+//  - loading: placeholder con la misma altura para que no haya layout shift.
+const ChartCobradoPorDia = dynamic(
+  () => import("@/app/_components/ChartCobradoPorDia"),
+  {
+    ssr: false,
+    loading: () => <div className="h-full w-full animate-pulse rounded-lg bg-slate-100" />,
+  },
+);
 
 // ── ZENTRA (solo dashboard / esta página) ─────────────────────────────────────
 // Paleta turquesa #4FAEB2 (rediseño 2026). Shell BLANCO con detalles turquesa
@@ -143,29 +155,42 @@ function formatFecha(s: string): string {
   return dt.toLocaleDateString("es-PY", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
+/** Hoy en Paraguay (UTC-3 fijo desde 2024), independiente del tz del navegador. */
+function ahoraPY(): Date {
+  const now = new Date();
+  // Aplicamos offset -3h y usamos los componentes UTC como si fueran locales
+  // para construir una Date con los YMD/HMS de Paraguay.
+  const shifted = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+  return new Date(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate(),
+    shifted.getUTCHours(),
+    shifted.getUTCMinutes(),
+    shifted.getUTCSeconds(),
+    shifted.getUTCMilliseconds()
+  );
+}
+
 function getRango(periodo: Periodo): { desde: Date; hasta: Date } {
-  const ahora = new Date();
+  const ahora = ahoraPY();
   switch (periodo) {
     case "mes":
       return rangoMesCalendarioLocal(ahora);
     case "hoy": {
-      const desde = new Date(ahora);
-      desde.setHours(0, 0, 0, 0);
-      const hasta = new Date(ahora);
-      hasta.setHours(23, 59, 59, 999);
+      const desde = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), 0, 0, 0, 0);
+      const hasta = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), 23, 59, 59, 999);
       return { desde, hasta };
     }
     case "7d": {
-      const hasta = new Date(ahora);
-      hasta.setHours(23, 59, 59, 999);
+      const hasta = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), 23, 59, 59, 999);
       const desde = new Date(ahora);
       desde.setDate(desde.getDate() - 7);
       desde.setHours(0, 0, 0, 0);
       return { desde, hasta };
     }
     case "30d": {
-      const hasta = new Date(ahora);
-      hasta.setHours(23, 59, 59, 999);
+      const hasta = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), 23, 59, 59, 999);
       const desde = new Date(ahora);
       desde.setDate(desde.getDate() - 30);
       desde.setHours(0, 0, 0, 0);
@@ -496,7 +521,7 @@ function KpiCard({
   value,
   sub,
   color = "text-[#0F172A]",
-  icon,
+  icon: IconCmp,
   variation,
   variant = "light",
 }: {
@@ -504,7 +529,7 @@ function KpiCard({
   value: string;
   sub?: string;
   color?: string;
-  icon: string;
+  icon: LucideIcon;
   variation?: number;
   variant?: "light" | "zentra";
 }) {
@@ -516,7 +541,9 @@ function KpiCard({
         style={{ backgroundColor: Z.card }}
       >
         <div className="flex items-start justify-between gap-2">
-          <div className="text-2xl opacity-90">{icon}</div>
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#4FAEB2]/15 text-[#3F8E91]">
+            <IconCmp className="h-5 w-5" strokeWidth={2} />
+          </div>
           {variation !== undefined && (
             <span
               className="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-semibold"
@@ -548,7 +575,9 @@ function KpiCard({
       className="rounded-2xl border border-[#4FAEB2]/30 bg-white p-6 shadow-sm ring-1 ring-[#4FAEB2]/10 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="text-2xl">{icon}</div>
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#4FAEB2]/12 text-[#3F8E91]">
+          <IconCmp className="h-5 w-5" strokeWidth={2} />
+        </div>
         {variation !== undefined && (
           <span
             className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-semibold ${
@@ -606,7 +635,12 @@ function etiquetaPlanServicioCliente(
   return "—";
 }
 
-function DashComercial({
+// memo evita re-render de este sub-dashboard cuando cambia algo en el padre
+// que no afecta a sus props (ej: usuario abre dropdown del header, cambia tab,
+// se actualizan KPIs de otra seccion). Los datos del comercial son grandes
+// (prospectos+clientes+facturas+notasCredito+suscripciones) y los useMemo
+// internos solo se cachean si el componente no re-renderea.
+const DashComercial = memo(function DashComercial({
   prospectos,
   clientes,
   mapNombreTipoServicio,
@@ -786,16 +820,16 @@ function DashComercial({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           variant="zentra"
-          icon="🎯"
+          icon={Target}
           label="Leads nuevos"
           value={String(leadsNuevos)}
           color="text-[#60A5FA]"
           variation={12}
         />
-        <KpiCard variant="zentra" icon="💬" label="En negociación" value={String(enNegociacion)} color="text-amber-400" />
+        <KpiCard variant="zentra" icon={MessageCircle} label="En negociación" value={String(enNegociacion)} color="text-amber-400" />
         <KpiCard
           variant="zentra"
-          icon="✅"
+          icon={CheckCircle2}
           label="Clientes ganados (CRM)"
           value={String(clientesGanados)}
           color="text-[#60A5FA]"
@@ -803,7 +837,7 @@ function DashComercial({
         />
         <KpiCard
           variant="zentra"
-          icon="📈"
+          icon={TrendingUp}
           label="Tasa de conversión"
           value={`${tasaConversion.toFixed(1)}%`}
           color={tasaConversion >= config.meta_conversion_leads ? "text-emerald-400" : "text-white"}
@@ -971,7 +1005,7 @@ function DashComercial({
       </motion.div>
     </div>
   );
-}
+});
 
 // ── Dashboard Financiero ──────────────────────────────────────────────────────
 
@@ -1042,7 +1076,9 @@ function composicionFacturacionPorModalidad(facturasPeriodo: FacturaRaw[]) {
   };
 }
 
-function DashFinanciero({
+// memo: el sub-dashboard financiero hace muchos useMemo internos sobre facturas
+// y pagos. Sin memo, cualquier render del padre (ej: cambio de tab) los invalidaba.
+const DashFinanciero = memo(function DashFinanciero({
   facturas, pagos, clientes, ventas, periodo, config, mapNombreTipoServicio,
 }: {
   facturas:  FacturaRaw[];
@@ -1351,59 +1387,13 @@ function DashFinanciero({
           <p className="mt-6 text-sm text-slate-500">Sin rango de fechas válido.</p>
         ) : (
           <div className="mt-5 h-[300px] w-full min-w-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={cobradoPorDiaSerie} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
-                <CartesianGrid stroke="#e2e8f0" vertical={false} />
-                <XAxis
-                  dataKey="fecha"
-                  tick={{ fill: "#64748b", fontSize: 10 }}
-                  tickLine={false}
-                  axisLine={{ stroke: "#cbd5e1" }}
-                  tickFormatter={(ymd: string) => {
-                    if (!ymd || ymd.length < 10) return ymd;
-                    return `${ymd.slice(8, 10)}/${ymd.slice(5, 7)}`;
-                  }}
-                  minTickGap={28}
-                />
-                <YAxis
-                  tick={{ fill: "#64748b", fontSize: 10 }}
-                  tickLine={false}
-                  axisLine={{ stroke: "#cbd5e1" }}
-                  tickFormatter={(v: number) => formatGsM(Number(v))}
-                  width={52}
-                />
-                <Tooltip
-                  cursor={{ stroke: "rgba(37,99,235,0.25)", strokeWidth: 1 }}
-                  content={({ active, payload }) => {
-                    if (!active || !payload?.length) return null;
-                    const row = payload[0].payload as {
-                      fecha: string;
-                      monto: number;
-                      count: number;
-                    };
-                    return (
-                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 shadow-lg">
-                        <p className="font-medium text-slate-500">{formatFecha(row.fecha)}</p>
-                        <p className="mt-1.5 text-sm font-semibold tabular-nums text-slate-900">
-                          Gs. {formatGs(row.monto)}
-                        </p>
-                        <p className="mt-1 text-[11px] text-slate-500">
-                          {row.count} pago{row.count === 1 ? "" : "s"}
-                        </p>
-                      </div>
-                    );
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="monto"
-                  stroke={finAccent}
-                  strokeWidth={2.5}
-                  dot={false}
-                  activeDot={{ r: 5, fill: finAccent, stroke: "#fff", strokeWidth: 2 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            <ChartCobradoPorDia
+              data={cobradoPorDiaSerie}
+              accentColor={finAccent}
+              formatGs={formatGs}
+              formatGsM={formatGsM}
+              formatFecha={formatFecha}
+            />
           </div>
         )}
       </div>
@@ -1554,19 +1544,7 @@ function DashFinanciero({
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5 lg:gap-8">
         <motion.div whileHover={{ y: -2 }} className={`${finCard} lg:col-span-3`}>
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Progreso de metas</h3>
-          <div className="mt-6 grid grid-cols-1 gap-8 sm:grid-cols-2">
-            <ProgressBar
-              variant="light"
-              label="Facturación mensual"
-              value={facturasValidas
-                .filter((f) => enMesCalendarioActual(toCalendarDateStr(f.fecha)))
-                .reduce((s, f) => {
-                  const t = Number(f.monto);
-                  return s + (Number.isFinite(t) ? t : 0);
-                }, 0)}
-              meta={config.meta_facturacion_mensual}
-              format="gs"
-            />
+          <div className="mt-6 grid grid-cols-1 gap-8">
             <ProgressBar
               variant="light"
               label="Ventas mensuales"
@@ -1605,11 +1583,13 @@ function DashFinanciero({
       </div>
     </div>
   );
-}
+});
 
 // ── Dashboard Inventario ─────────────────────────────────────────────────────
 
-function DashInventario({
+// memo: dashboard de inventario hace filter/reduce sobre productos en cada render.
+// Sin memo, cualquier cambio en el padre re-ejecutaba esos calculos.
+const DashInventario = memo(function DashInventario({
   productos,
   compras,
 }: {
@@ -1652,59 +1632,63 @@ function DashInventario({
 
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard icon="📦" label="Productos totales"      value={String(totalProductos)} color="text-[#0EA5E9]" variation={4} />
-        <KpiCard icon="🔢" label="Stock total (unidades)" value={formatGs(totalUnidades)} color="text-[#0EA5E9]" />
-        <KpiCard icon="⚠️" label="Bajo stock mínimo"      value={String(bajosStock)}
+        <KpiCard icon={Package} label="Productos totales"      value={String(totalProductos)} color="text-[#3F8E91]" variation={4} />
+        <KpiCard icon={Hash} label="Stock total (unidades)" value={formatGs(totalUnidades)} color="text-[#3F8E91]" />
+        <KpiCard icon={AlertTriangle} label="Bajo stock mínimo"      value={String(bajosStock)}
           sub={bajosStock > 0 ? "requieren reposición" : "todo en orden"}
-          color={bajosStock > 0 ? "text-red-600" : "text-[#0EA5E9]"}
+          color={bajosStock > 0 ? "text-red-600" : "text-[#3F8E91]"}
           variation={bajosStock > 0 ? -2 : undefined} />
-        <KpiCard icon="💎" label="Valor del inventario"   value={`Gs. ${formatGsFull(valorTotal)}`} color="text-[#0EA5E9]" variation={12} />
+        <KpiCard icon={Gem} label="Valor del inventario"   value={`Gs. ${formatGsFull(valorTotal)}`} color="text-[#3F8E91]" variation={12} />
       </div>
 
       {/* Donut + Críticos */}
       <div className="grid grid-cols-3 gap-4">
-        <motion.div whileHover={{ y: -2 }} className="bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 p-6">
-          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Estado del stock</h3>
+        <motion.div whileHover={{ y: -2 }} className="rounded-2xl border border-[#4FAEB2]/30 bg-white p-6 shadow-sm ring-1 ring-[#4FAEB2]/10 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+          <h3 className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700">
+            <span className="inline-block h-3.5 w-1 rounded-full bg-[#4FAEB2]" />
+            Estado del stock
+          </h3>
           <DonutChart segments={[
             { label: "Saludable", value: cntSaludable, color: "#22c55e" },
             { label: "Bajo",      value: cntBajo,      color: "#f59e0b" },
             { label: "Crítico",   value: cntCritico,   color: "#ef4444" },
           ]} centerLabel="productos" />
         </motion.div>
-        <motion.div whileHover={{ y: -2 }} className="col-span-2 bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 p-6 transition-shadow hover:shadow-md">
-          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">
+        <motion.div whileHover={{ y: -2 }} className="col-span-2 rounded-2xl border border-[#4FAEB2]/30 bg-white p-6 shadow-sm ring-1 ring-[#4FAEB2]/10 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+          <h3 className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700">
+            <span className="inline-block h-3.5 w-1 rounded-full bg-[#4FAEB2]" />
             Productos críticos — stock bajo mínimo
           </h3>
           {criticos.length === 0 ? (
             <div className="flex items-center gap-2 text-[var(--badge-success-text)] bg-[var(--badge-success-bg)] rounded-lg px-4 py-3 text-sm">
-              <span>✅</span> Todos los productos tienen stock suficiente.
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" strokeWidth={2} /> Todos los productos tienen stock suficiente.
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50 border-b border-slate-200">
+                <thead className="bg-[#E5F4F4] border-b-2 border-[#4FAEB2]/40">
                   <tr>
                     <th className="w-10 px-3 py-3">
-                      <input type="checkbox" className="rounded border-slate-300 text-[#0EA5E9] focus:ring-[#0EA5E9]" />
+                      <input type="checkbox" className="h-4 w-4 rounded border-slate-300 accent-[#4FAEB2]" />
                     </th>
                     {["Producto", "Stock actual", "Stock mín.", "Estado", "Proveedor"].map(h => (
-                      <th key={h} className="text-left text-xs font-semibold text-slate-500 px-3 py-3 uppercase tracking-wide">{h}</th>
+                      <th key={h} className="text-left text-xs font-bold text-[#3F8E91] px-3 py-3 uppercase tracking-wide">{h}</th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200">
+                <tbody className="divide-y divide-slate-100">
                   {criticos.map(p => (
-                    <tr key={p.id} className={`${p.stock_actual <= 0 ? "bg-red-50/40 dark:bg-red-900/10" : "bg-amber-50/30 dark:bg-amber-900/10"} hover:bg-opacity-80 transition-colors`}>
+                    <tr key={p.id} className={`${p.stock_actual <= 0 ? "bg-red-50/50" : "bg-amber-50/40"} transition-colors hover:bg-[#4FAEB2]/10`}>
                       <td className="px-3 py-2.5">
-                        <input type="checkbox" className="rounded border-slate-300 text-[#0EA5E9] focus:ring-[#0EA5E9]" />
+                        <input type="checkbox" className="h-4 w-4 rounded border-slate-300 accent-[#4FAEB2]" />
                       </td>
-                      <td className="px-3 py-2.5 text-xs font-medium text-slate-800 dark:text-slate-200">{p.nombre}</td>
+                      <td className="px-3 py-2.5 text-xs font-semibold text-slate-900">{p.nombre}</td>
                       <td className="px-3 py-2.5">
-                        <span className={`text-xs font-bold tabular-nums ${p.stock_actual <= 0 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`}>
+                        <span className={`text-xs font-bold tabular-nums ${p.stock_actual <= 0 ? "text-red-600" : "text-amber-600"}`}>
                           {p.stock_actual} {p.unidad_medida}
                         </span>
                       </td>
-                      <td className="px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400 tabular-nums">{p.stock_minimo} {p.unidad_medida}</td>
+                      <td className="px-3 py-2.5 text-xs font-medium text-slate-600 tabular-nums">{p.stock_minimo} {p.unidad_medida}</td>
                       <td className="px-3 py-2.5">
                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${
                           p.stock_actual <= 0 ? "bg-[var(--badge-error-bg)] text-[var(--badge-error-text)]" : "bg-[var(--badge-warning-bg)] text-[var(--badge-warning-text)]"
@@ -1712,7 +1696,7 @@ function DashInventario({
                           {p.stock_actual <= 0 ? "Crítico" : "Bajo"}
                         </span>
                       </td>
-                      <td className="px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400">{proveedorMap[String(p.id)] ?? "—"}</td>
+                      <td className="px-3 py-2.5 text-xs font-medium text-slate-600">{proveedorMap[String(p.id)] ?? "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1723,36 +1707,37 @@ function DashInventario({
       </div>
 
       {/* Top por valor */}
-      <motion.div whileHover={{ y: -2 }} className="bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 p-6 transition-shadow hover:shadow-md">
-        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">
+      <motion.div whileHover={{ y: -2 }} className="rounded-2xl border border-[#4FAEB2]/30 bg-white p-6 shadow-sm ring-1 ring-[#4FAEB2]/10 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+        <h3 className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700">
+          <span className="inline-block h-3.5 w-1 rounded-full bg-[#4FAEB2]" />
           Top productos por valor de inventario
         </h3>
         {topPorValor.length === 0 ? (
           <p className="text-sm text-slate-400 text-center py-6">Sin productos registrados.</p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
+              <thead className="bg-[#E5F4F4] border-b-2 border-[#4FAEB2]/40">
                 <tr>
                   <th className="w-10 px-3 py-3">
-                    <input type="checkbox" className="rounded border-slate-300 text-[#0EA5E9] focus:ring-[#0EA5E9]" />
+                    <input type="checkbox" className="h-4 w-4 rounded border-slate-300 accent-[#4FAEB2]" />
                   </th>
                   {["Producto", "SKU", "Stock", "Costo promedio", "Valor inventario"].map(h => (
-                    <th key={h} className="text-left text-xs font-semibold text-slate-500 px-3 py-3 uppercase tracking-wide">{h}</th>
+                    <th key={h} className="text-left text-xs font-bold text-[#3F8E91] px-3 py-3 uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200">
+              <tbody className="divide-y divide-slate-100">
                 {topPorValor.map(p => (
-                  <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                  <tr key={p.id} className="transition-colors hover:bg-[#4FAEB2]/10">
                     <td className="px-3 py-2.5">
-                      <input type="checkbox" className="rounded border-slate-300 text-[#0EA5E9] focus:ring-[#0EA5E9]" />
+                      <input type="checkbox" className="h-4 w-4 rounded border-slate-300 accent-[#4FAEB2]" />
                     </td>
-                    <td className="px-3 py-2.5 text-xs font-medium text-slate-800 dark:text-slate-200">{p.nombre}</td>
-                    <td className="px-3 py-2.5 font-mono text-xs text-slate-500 dark:text-slate-400">{p.sku}</td>
-                    <td className="px-3 py-2.5 text-xs tabular-nums text-slate-700 dark:text-slate-300">{p.stock_actual}</td>
-                    <td className="px-3 py-2.5 text-xs tabular-nums text-slate-500 dark:text-slate-400">Gs. {formatGs(p.costo_promedio)}</td>
-                    <td className="px-3 py-2.5 text-xs tabular-nums font-semibold text-slate-800 dark:text-slate-200">Gs. {formatGs(p.valor)}</td>
+                    <td className="px-3 py-2.5 text-xs font-semibold text-slate-900">{p.nombre}</td>
+                    <td className="px-3 py-2.5 font-mono text-xs font-medium text-[#3F8E91]">{p.sku}</td>
+                    <td className="px-3 py-2.5 text-xs tabular-nums font-medium text-slate-700">{p.stock_actual}</td>
+                    <td className="px-3 py-2.5 text-xs tabular-nums text-slate-600">Gs. {formatGs(p.costo_promedio)}</td>
+                    <td className="px-3 py-2.5 text-xs tabular-nums font-bold text-slate-900">Gs. {formatGs(p.valor)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1763,11 +1748,13 @@ function DashInventario({
 
     </div>
   );
-}
+});
 
 // ── Dashboard Ventas ──────────────────────────────────────────────────────────
 
-function DashVentas({
+// memo: ventas + productos pueden ser arrays grandes; los filter/reduce internos
+// solo se cachean si no re-renderea el componente entero.
+const DashVentas = memo(function DashVentas({
   ventas,
   productos,
   periodo,
@@ -1856,20 +1843,22 @@ function DashVentas({
 
       {/* KPIs principales */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard icon="📅" label="Ventas del día"    value={`Gs. ${formatGsFull(totalHoy)}`}
+        <KpiCard icon={Calendar} label="Ventas del día"    value={`Gs. ${formatGsFull(totalHoy)}`}
           sub={`${ventasHoy.length} transacciones`} color="text-blue-600" />
-        <KpiCard icon="📆" label="Ventas del mes"    value={`Gs. ${formatGsFull(totalMes)}`}
+        <KpiCard icon={CalendarDays} label="Ventas del mes"    value={`Gs. ${formatGsFull(totalMes)}`}
           sub={`${ventasMes.length} transacciones`} color="text-indigo-600" />
-        <KpiCard icon="🎫" label="Ticket promedio"   value={`Gs. ${formatGsFull(ticketProm)}`}
+        <KpiCard icon={Receipt} label="Ticket promedio"   value={`Gs. ${formatGsFull(ticketProm)}`}
           sub={`periodo: ${periodo}`} />
-        <KpiCard icon="📦" label="Unidades vendidas" value={formatGs(unidades)}
+        <KpiCard icon={Boxes} label="Unidades vendidas" value={formatGs(unidades)}
           sub={`en el periodo`} />
       </div>
 
       {/* KPIs rentabilidad */}
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex items-start gap-3">
-          <span className="text-2xl">💰</span>
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+            <DollarSign className="h-5 w-5" strokeWidth={2} />
+          </div>
           <div>
             <p className={`text-2xl font-bold tabular-nums ${gananciaHoy >= 0 ? "text-green-600" : "text-red-600"}`}>
               Gs. {formatGsFull(gananciaHoy)}
@@ -1879,7 +1868,9 @@ function DashVentas({
           </div>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex items-start gap-3">
-          <span className="text-2xl">📊</span>
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
+            <BarChart3 className="h-5 w-5" strokeWidth={2} />
+          </div>
           <div>
             <p className={`text-2xl font-bold tabular-nums ${margenProm >= 20 ? "text-green-600" : margenProm >= 10 ? "text-amber-600" : "text-red-600"}`}>
               {margenProm.toFixed(1)}%
@@ -1949,6 +1940,207 @@ function DashVentas({
 
     </div>
   );
+});
+
+// ── Dashboard Compras ─────────────────────────────────────────────────────────
+
+const DashCompras = memo(function DashCompras({
+  compras,
+  periodo,
+}: {
+  compras: CompraRaw[];
+  periodo: Periodo;
+}) {
+  const { desde: desdeD, hasta: hastaD } = getRango(periodo);
+  const desde = desdeD.toISOString().slice(0, 10);
+  const hasta = hastaD.toISOString().slice(0, 10);
+
+  // Agrupamos por numero_control (una "compra" real = N líneas con mismo N° control).
+  type Grupo = {
+    numero_control: string;
+    proveedor_nombre: string;
+    total: number;
+    fecha: string;
+    tipo_pago: string | null;
+    plazo_dias: number | null;
+    vencimientoDate: Date | null;
+    diasHastaVence: number | null;
+  };
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+
+  const gruposMap = new Map<string, Grupo>();
+  for (const c of compras) {
+    const key = c.numero_control || String(c.id);
+    const g = gruposMap.get(key);
+    if (!g) {
+      let vencimientoDate: Date | null = null;
+      let diasHastaVence: number | null = null;
+      if (c.tipo_pago === "credito" && c.plazo_dias && c.fecha) {
+        const base = new Date(c.fecha);
+        base.setDate(base.getDate() + Number(c.plazo_dias));
+        base.setHours(0, 0, 0, 0);
+        vencimientoDate = base;
+        diasHastaVence = Math.round((base.getTime() - hoy.getTime()) / 86400000);
+      }
+      gruposMap.set(key, {
+        numero_control: key,
+        proveedor_nombre: c.proveedor_nombre,
+        total: Number(c.total) || 0,
+        fecha: c.fecha,
+        tipo_pago: c.tipo_pago ?? null,
+        plazo_dias: c.plazo_dias ?? null,
+        vencimientoDate,
+        diasHastaVence,
+      });
+    } else {
+      g.total += Number(c.total) || 0;
+    }
+  }
+  const grupos = [...gruposMap.values()];
+
+  // Del período (para "compras del período")
+  const gruposPeriodo = grupos.filter((g) => g.fecha >= desde && g.fecha <= hasta);
+  const totalPeriodo = gruposPeriodo.reduce((s, g) => s + g.total, 0);
+
+  // Deuda con proveedores = compras crédito no vencidas ni anuladas (ya excluidas)
+  const conCredito = grupos.filter((g) => g.tipo_pago === "credito" && g.vencimientoDate);
+  const deudaTotal = conCredito.reduce((s, g) => s + g.total, 0);
+  const porVencer = conCredito
+    .filter((g) => (g.diasHastaVence ?? 0) >= 0 && (g.diasHastaVence ?? 0) <= 30)
+    .sort((a, b) => (a.diasHastaVence ?? 0) - (b.diasHastaVence ?? 0));
+  const vencidas = conCredito
+    .filter((g) => (g.diasHastaVence ?? 0) < 0)
+    .sort((a, b) => (a.diasHastaVence ?? 0) - (b.diasHastaVence ?? 0));
+
+  const totalPorVencer = porVencer.reduce((s, g) => s + g.total, 0);
+  const totalVencidas = vencidas.reduce((s, g) => s + g.total, 0);
+
+  // Top proveedores (por gasto del período)
+  const porProveedor = new Map<string, number>();
+  for (const g of gruposPeriodo) {
+    porProveedor.set(g.proveedor_nombre, (porProveedor.get(g.proveedor_nombre) ?? 0) + g.total);
+  }
+  const topProveedores = [...porProveedor.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  const finCard = "rounded-2xl border border-slate-200 bg-white p-6 shadow-sm";
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatBox label="Compras del período" value={`Gs. ${Math.round(totalPeriodo).toLocaleString("es-PY")}`} sub={`${gruposPeriodo.length} compras`} />
+        <StatBox label="Deuda con proveedores" value={`Gs. ${Math.round(deudaTotal).toLocaleString("es-PY")}`} sub={`${conCredito.length} facturas`} />
+        <StatBox label="Por vencer (30 días)" value={`Gs. ${Math.round(totalPorVencer).toLocaleString("es-PY")}`} sub={`${porVencer.length} facturas`} tone="warn" />
+        <StatBox label="Vencidas" value={`Gs. ${Math.round(totalVencidas).toLocaleString("es-PY")}`} sub={`${vencidas.length} facturas`} tone="danger" />
+      </div>
+
+      <div className={finCard}>
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Próximas a vencer</h3>
+        {porVencer.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-400">No hay compras a crédito por vencer en los próximos 30 días.</p>
+        ) : (
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead className="border-b border-slate-200">
+                <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="pb-2 pr-4">N° Control</th>
+                  <th className="pb-2 pr-4">Proveedor</th>
+                  <th className="pb-2 pr-4 text-right">Total</th>
+                  <th className="pb-2 pr-4 text-center">Vence</th>
+                  <th className="pb-2 text-center">Días</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {porVencer.slice(0, 20).map((g) => {
+                  const dias = g.diasHastaVence ?? 0;
+                  const tone = dias <= 3 ? "text-red-600" : dias <= 7 ? "text-orange-600" : "text-slate-600";
+                  return (
+                    <tr key={g.numero_control} className="hover:bg-slate-50/50">
+                      <td className="py-2 pr-4 font-mono text-xs text-slate-500">{g.numero_control}</td>
+                      <td className="py-2 pr-4 text-slate-800">{g.proveedor_nombre}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums font-semibold text-slate-800">Gs. {Math.round(g.total).toLocaleString("es-PY")}</td>
+                      <td className="py-2 pr-4 text-center text-xs text-slate-500">{g.vencimientoDate?.toLocaleDateString("es-PY")}</td>
+                      <td className={`py-2 text-center text-xs font-semibold ${tone}`}>{dias} días</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {vencidas.length > 0 && (
+        <div className={`${finCard} border-red-200 bg-red-50/40`}>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-red-700">Vencidas · pagar urgente</h3>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead className="border-b border-red-200">
+                <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-red-700">
+                  <th className="pb-2 pr-4">N° Control</th>
+                  <th className="pb-2 pr-4">Proveedor</th>
+                  <th className="pb-2 pr-4 text-right">Total</th>
+                  <th className="pb-2 pr-4 text-center">Vencía</th>
+                  <th className="pb-2 text-center">Atraso</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-red-100">
+                {vencidas.slice(0, 20).map((g) => (
+                  <tr key={g.numero_control} className="hover:bg-red-50">
+                    <td className="py-2 pr-4 font-mono text-xs text-red-700">{g.numero_control}</td>
+                    <td className="py-2 pr-4 text-red-800">{g.proveedor_nombre}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums font-bold text-red-800">Gs. {Math.round(g.total).toLocaleString("es-PY")}</td>
+                    <td className="py-2 pr-4 text-center text-xs text-red-600">{g.vencimientoDate?.toLocaleDateString("es-PY")}</td>
+                    <td className="py-2 text-center text-xs font-bold text-red-700">{Math.abs(g.diasHastaVence ?? 0)} días</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className={finCard}>
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Top proveedores del período</h3>
+        {topProveedores.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-400">Sin compras en el período seleccionado.</p>
+        ) : (
+          <ul className="mt-4 space-y-2">
+            {topProveedores.map(([nombre, monto]) => {
+              const pct = totalPeriodo > 0 ? (monto / totalPeriodo) * 100 : 0;
+              return (
+                <li key={nombre}>
+                  <div className="mb-1 flex items-center justify-between text-sm">
+                    <span className="font-medium text-slate-800">{nombre}</span>
+                    <span className="tabular-nums font-semibold text-slate-700">Gs. {Math.round(monto).toLocaleString("es-PY")}</span>
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-slate-100">
+                    <div className="h-full rounded-full bg-[#4FAEB2]" style={{ width: `${Math.min(100, pct)}%` }} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+});
+
+function StatBox({ label, value, sub, tone = "default" }: { label: string; value: string; sub?: string; tone?: "default" | "warn" | "danger" }) {
+  const toneClass =
+    tone === "danger" ? "border-red-200 bg-red-50/40 text-red-700" :
+    tone === "warn" ? "border-amber-200 bg-amber-50/50 text-amber-700" :
+    "border-slate-200 bg-white text-slate-800";
+  return (
+    <div className={`rounded-2xl border p-5 shadow-sm ${toneClass}`}>
+      <p className="text-[10px] font-bold uppercase tracking-wider opacity-75">{label}</p>
+      <p className="mt-1 text-lg font-bold tabular-nums">{value}</p>
+      {sub && <p className="mt-0.5 text-[11px] opacity-70">{sub}</p>}
+    </div>
+  );
 }
 
 // ── Página principal ──────────────────────────────────────────────────────────
@@ -1961,7 +2153,7 @@ const PERIODO_OPTS: { id: Periodo; label: string }[] = [
   { id: "anio", label: "Año"       },
 ];
 
-const TAB_VALID: TabDash[] = ["comercial", "financiero", "inventario", "ventas"];
+const TAB_VALID: TabDash[] = ["comercial", "financiero", "inventario", "ventas", "compras"];
 
 type DashScope =
   | { kind: "pending" }
@@ -2102,8 +2294,13 @@ export default function DashboardPage() {
   const nivel = usuarioActivo?.nivel ?? "administrador";
 
   // Instancia En lo de Mari: solo Ventas / Inventario / Financiero (sin Comercial/CRM/Pipeline).
-  const MARI_ALLOWED_TABS: TabDash[] = ["ventas", "inventario", "financiero"];
-  const rawTabs: TabDash[] = dashScope.kind === "scoped" ? dashScope.tabs : TAB_VALID;
+  const MARI_ALLOWED_TABS: TabDash[] = ["ventas", "inventario", "financiero", "compras"];
+  // 'compras' es un tab nuevo que aun no esta registrado en el catalogo
+  // dashboard_views de la DB. Lo inyectamos siempre para que aparezca sin
+  // depender de una migracion.
+  const rawTabs: TabDash[] = dashScope.kind === "scoped"
+    ? Array.from(new Set<TabDash>([...dashScope.tabs, "compras"]))
+    : TAB_VALID;
   const effectiveTabs: TabDash[] = rawTabs.filter((t) => MARI_ALLOWED_TABS.includes(t));
   const showTabNav = effectiveTabs.length > 1;
 
@@ -2117,11 +2314,12 @@ export default function DashboardPage() {
     }
   }, [tab, effectiveTabs]);
 
-  const TAB_META: Record<TabDash, { label: string; icon: string }> = {
-    comercial: { label: "Comercial", icon: "📊" },
-    financiero: { label: "Financiero", icon: "💰" },
-    inventario: { label: "Inventario", icon: "📦" },
-    ventas: { label: "Ventas", icon: "🛒" },
+  const TAB_META: Record<TabDash, { label: string; Icon: LucideIcon }> = {
+    comercial: { label: "Comercial", Icon: BarChart3 },
+    financiero: { label: "Financiero", Icon: Wallet },
+    inventario: { label: "Inventario", Icon: Package },
+    ventas: { label: "Ventas", Icon: ShoppingCart },
+    compras: { label: "Compras", Icon: Truck },
   };
 
   if (!config) {
@@ -2197,8 +2395,26 @@ export default function DashboardPage() {
   }
 
   return (
-    <div
-      className="zentra-dashboard-shell space-y-8 rounded-2xl border border-slate-200 px-4 py-8 sm:px-6 md:px-8"
+    <>
+      {/* MOBILE (< md=768px): dashboard rediseñado especialmente para mobile.
+          Touch-first, KPIs apilados, acciones rápidas grandes, alertas, cards
+          en vez de tablas. Layout COMPLETAMENTE distinto al desktop. */}
+      <div className="lg:hidden">
+        <MobileDashboard
+          clientes={clientes}
+          facturas={facturas}
+          pagos={pagos}
+          productos={productos}
+          ventas={ventas}
+          gastos={gastos}
+          notasCredito={notasCredito}
+        />
+      </div>
+
+      {/* DESKTOP (>= md=768px): dashboard original con todos los sub-tabs,
+          gráficos, tablas. Intacto, cero cambios. */}
+      <div
+      className="hidden lg:block zentra-dashboard-shell space-y-8 rounded-2xl border border-slate-200 px-4 py-8 sm:px-6 md:px-8"
       style={{ color: Z.muted }}
     >
       <header className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
@@ -2212,7 +2428,7 @@ export default function DashboardPage() {
               Dashboard
             </h1>
             <p className="mt-1 max-w-md text-sm leading-relaxed" style={{ color: Z.muted }}>
-              ASUNHOME ERP · Vista {nivel === "supervisor" ? "de tu área" : "global"} · período alineado al filtro
+              Neura ERP · Vista {nivel === "supervisor" ? "de tu área" : "global"} · período alineado al filtro
             </p>
           </div>
         </div>
@@ -2281,7 +2497,7 @@ export default function DashboardPage() {
                     : { color: Z.muted }
                 }
               >
-                <span aria-hidden>{meta.icon}</span>
+                <meta.Icon className="h-4 w-4" strokeWidth={2} aria-hidden />
                 {meta.label}
               </button>
             );
@@ -2306,15 +2522,18 @@ export default function DashboardPage() {
       )}
 
       {tab === "financiero" && (
-        <DashFinanciero
-          facturas={facturas}
-          pagos={pagos}
-          clientes={clientes}
-          ventas={ventas}
-          periodo={periodo}
-          config={config}
-          mapNombreTipoServicio={mapNombreTipoServicio}
-        />
+        <div className="space-y-6">
+          <CobranzasResumenCards />
+          <DashFinanciero
+            facturas={facturas}
+            pagos={pagos}
+            clientes={clientes}
+            ventas={ventas}
+            periodo={periodo}
+            config={config}
+            mapNombreTipoServicio={mapNombreTipoServicio}
+          />
+        </div>
       )}
 
       {tab === "inventario" && (
@@ -2332,6 +2551,11 @@ export default function DashboardPage() {
         />
       )}
 
+      {tab === "compras" && (
+        <DashCompras compras={compras} periodo={periodo} />
+      )}
+
     </div>
+    </>
   );
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
+import { fetchWithSupabaseSession, isAbortError } from "@/lib/api/fetch-with-supabase-session";
 import type { ClienteHistorialRow } from "@/lib/auditoria/cliente-historial-servidor";
 
 function formatFechaHora(iso: string) {
@@ -73,24 +73,34 @@ export function ModalHistorialClienteGestion({
   const [error, setError] = useState<string | null>(null);
   const [filas, setFilas] = useState<ClienteHistorialRow[]>([]);
 
-  const cargar = useCallback(async () => {
+  // signal opcional: si el modal se cierra mid-fetch (user clickea fuera, navega
+  // a otra pagina), abortamos para no hacer setState sobre componente desmontado.
+  const cargar = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchWithSupabaseSession(`/api/clientes/${clienteId}/historial`);
+      const res = await fetchWithSupabaseSession(
+        `/api/clientes/${clienteId}/historial`,
+        { signal },
+      );
+      if (signal?.aborted) return;
       const json = await res.json();
+      if (signal?.aborted) return;
       if (!res.ok) throw new Error(json?.error ?? "Error al cargar");
       const out = (json.data?.filas as ClienteHistorialRow[] | undefined) ?? [];
       setFilas(out);
     } catch (e) {
+      if (isAbortError(e)) return;
       setError(e instanceof Error ? e.message : "Error al cargar");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [clienteId]);
 
   useEffect(() => {
-    void cargar();
+    const ctrl = new AbortController();
+    void cargar(ctrl.signal);
+    return () => ctrl.abort();
   }, [cargar]);
 
   return (

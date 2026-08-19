@@ -25,6 +25,9 @@ interface SupabaseRow {
   nombre_contacto:    string | null;
   ruc:                string | null;
   documento:          string | null;
+  nombre_facturacion?: string | null;
+  nivel_precio?:      string | null;
+  es_contribuyente?:  boolean | null;
   telefono:           string | null;
   telefono_secundario: string | null;
   email:              string | null;
@@ -32,6 +35,7 @@ interface SupabaseRow {
   direccion:          string | null;
   ciudad:             string | null;
   pais:               string | null;
+  usa_nota_remision?: boolean | null;
   sifen_receptor_extranjero?: boolean | null;
   sifen_codigo_pais?: string | null;
   sifen_tipo_doc_receptor?: number | string | null;
@@ -87,6 +91,11 @@ function rowToCliente(row: SupabaseRow): Cliente {
     nombre_contacto:     nombreContacto,
     ruc:                 row.ruc ?? undefined,
     documento:           row.documento ?? undefined,
+    nombre_facturacion:  row.nombre_facturacion ?? undefined,
+    nivel_precio:        (row.nivel_precio === "mayorista" || row.nivel_precio === "distribuidor"
+                            ? row.nivel_precio
+                            : "minorista") as Cliente["nivel_precio"],
+    es_contribuyente:    row.es_contribuyente === true,
     telefono:            row.telefono ?? undefined,
     telefono_secundario: row.telefono_secundario ?? undefined,
     email:               row.email ?? undefined,
@@ -94,6 +103,7 @@ function rowToCliente(row: SupabaseRow): Cliente {
     direccion:           row.direccion ?? undefined,
     ciudad:              row.ciudad ?? undefined,
     pais:                row.pais ?? undefined,
+    usa_nota_remision:   row.usa_nota_remision === true,
     sitio_web:           row.sitio_web ?? undefined,
     instagram:           row.instagram ?? undefined,
     linkedin:            row.linkedin ?? undefined,
@@ -291,6 +301,17 @@ export async function saveCliente(datos: NuevoClienteData): Promise<Cliente | nu
     prospecto_id:       datos.prospecto_id ?? null,
     estado:             datos.estado ?? "activo",
   };
+  if (datos.nombre_facturacion !== undefined) {
+    insert.nombre_facturacion =
+      datos.nombre_facturacion == null || String(datos.nombre_facturacion).trim() === ""
+        ? null
+        : String(datos.nombre_facturacion).trim().toUpperCase();
+  }
+  if (datos.nivel_precio !== undefined) {
+    const nv = String(datos.nivel_precio);
+    insert.nivel_precio = ["minorista", "mayorista", "distribuidor"].includes(nv) ? nv : "minorista";
+  }
+  if (datos.es_contribuyente !== undefined) insert.es_contribuyente = datos.es_contribuyente === true;
   if (datos.sifen_receptor_extranjero === true) insert.sifen_receptor_extranjero = true;
   if (datos.sifen_receptor_extranjero === false) insert.sifen_receptor_extranjero = false;
   if (datos.sifen_codigo_pais !== undefined) {
@@ -354,6 +375,17 @@ export function construirPatchActualizacionCliente(datos: ActualizarClienteInput
   }
   if (datos.ruc !== undefined) patch.ruc = datos.ruc ?? null;
   if (datos.documento !== undefined) patch.documento = datos.documento ?? null;
+  if (datos.nombre_facturacion !== undefined) {
+    patch.nombre_facturacion =
+      datos.nombre_facturacion == null || String(datos.nombre_facturacion).trim() === ""
+        ? null
+        : String(datos.nombre_facturacion).trim().toUpperCase();
+  }
+  if (datos.nivel_precio !== undefined) {
+    const nv = String(datos.nivel_precio);
+    patch.nivel_precio = ["minorista", "mayorista", "distribuidor"].includes(nv) ? nv : "minorista";
+  }
+  if (datos.es_contribuyente !== undefined) patch.es_contribuyente = datos.es_contribuyente === true;
   if (datos.telefono !== undefined) patch.telefono = datos.telefono ?? null;
   if (datos.telefono_secundario !== undefined) patch.telefono_secundario = datos.telefono_secundario ?? null;
   if (datos.email !== undefined) patch.email = datos.email ?? null;
@@ -361,6 +393,7 @@ export function construirPatchActualizacionCliente(datos: ActualizarClienteInput
   if (datos.direccion !== undefined) patch.direccion = datos.direccion ?? null;
   if (datos.ciudad !== undefined) patch.ciudad = datos.ciudad ?? null;
   if (datos.pais !== undefined) patch.pais = datos.pais ?? null;
+  if (datos.usa_nota_remision !== undefined) patch.usa_nota_remision = datos.usa_nota_remision === true;
   if (datos.sifen_receptor_extranjero !== undefined) {
     patch.sifen_receptor_extranjero = Boolean(datos.sifen_receptor_extranjero);
   }

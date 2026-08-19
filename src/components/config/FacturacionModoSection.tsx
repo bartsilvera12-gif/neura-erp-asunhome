@@ -63,24 +63,41 @@ export default function FacturacionModoSection() {
   const [okModo, setOkModo] = useAutoClearFlag<string>(1500);
   const [okAuto, setOkAuto] = useAutoClearFlag<string>(1500);
 
-  const cargar = useCallback(async () => {
+  const cargar = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setErrModo(null); setErrAuto(null);
     try {
       const [m, a] = await Promise.all([
-        fetch("/api/configuracion/facturacion-modo", { credentials: "include", cache: "no-store" }).then((r) => r.json()),
-        fetch("/api/configuracion/autoimpresor", { credentials: "include", cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/configuracion/facturacion-modo", {
+          credentials: "include",
+          cache: "no-store",
+          signal,
+        }).then((r) => r.json()),
+        fetch("/api/configuracion/autoimpresor", {
+          credentials: "include",
+          cache: "no-store",
+          signal,
+        }).then((r) => r.json()),
       ]);
+      if (signal?.aborted) return;
       if (m?.success) setModo(m.data.facturacion_modo as FacturacionModo);
       else setErrModo(m?.error ?? "Error al cargar modo");
       if (a?.success) setAuto(a.data.autoimpresor as Autoimpresor);
       else setErrAuto(a?.error ?? "Error al cargar autoimpresor");
     } catch (e) {
+      // AbortError: el caller cambio de tab antes que termine la carga; no toques estado.
+      if (e instanceof DOMException && e.name === "AbortError") return;
       setErrModo(e instanceof Error ? e.message : "Error de red");
-    } finally { setLoading(false); }
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { void cargar(); }, [cargar]);
+  useEffect(() => {
+    const ctrl = new AbortController();
+    void cargar(ctrl.signal);
+    return () => ctrl.abort();
+  }, [cargar]);
 
   async function guardarModo(patch: Partial<FacturacionModo>) {
     if (!modo) return;

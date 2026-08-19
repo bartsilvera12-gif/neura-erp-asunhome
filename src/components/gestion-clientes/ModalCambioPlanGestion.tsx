@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
+import { fetchWithSupabaseSession, isAbortError } from "@/lib/api/fetch-with-supabase-session";
 import type { CambioPlanContexto, ModoCambioPlan } from "@/lib/facturacion/cambio-plan-cliente-types";
 
 const fInputClass =
@@ -44,12 +44,21 @@ export function ModalCambioPlanGestion({
   const [submitting, setSubmitting] = useState(false);
   const [errPost, setErrPost] = useState<string | null>(null);
 
-  const cargar = useCallback(async () => {
+  // cargar acepta un signal para que se pueda cancelar si el modal se cierra
+  // antes de que termine el fetch. Sin esto: si el user cierra el modal mid-fetch,
+  // los setState siguientes disparan "Can't perform a React state update on an
+  // unmounted component" y dejan el componente colgado en memoria.
+  const cargar = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchWithSupabaseSession(`/api/clientes/${clienteId}/cambio-plan`);
+      const res = await fetchWithSupabaseSession(
+        `/api/clientes/${clienteId}/cambio-plan`,
+        { signal },
+      );
+      if (signal?.aborted) return;
       const json = await res.json();
+      if (signal?.aborted) return;
       if (!res.ok) throw new Error(json?.error ?? "Error al cargar");
       const c = json.data as CambioPlanContexto;
       setCtx(c);
@@ -62,14 +71,17 @@ export function ModalCambioPlanGestion({
       else if (c.modos_permitidos[0]) setModo(c.modos_permitidos[0]);
       else setModo("proximo_mes");
     } catch (e) {
+      if (isAbortError(e)) return;
       setError(e instanceof Error ? e.message : "Error al cargar");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [clienteId]);
 
   useEffect(() => {
-    void cargar();
+    const ctrl = new AbortController();
+    void cargar(ctrl.signal);
+    return () => ctrl.abort();
   }, [cargar]);
 
   const planElegido = ctx?.planes.find((p) => p.id === planId);
@@ -271,7 +283,7 @@ export function ModalCambioPlanGestion({
                 !ctx.modos_permitidos.includes(modo) ||
                 ctx.caso === "sin_suscripcion"
               }
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-[#4FAEB2] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#3F8E91] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? "Aplicando…" : "Confirmar cambio"}
             </button>

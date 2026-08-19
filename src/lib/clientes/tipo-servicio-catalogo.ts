@@ -98,14 +98,38 @@ const SEED_ROWS: { slug: SlugTipoClienteSistema; nombre: string; orden: number }
 const SLUGS_SISTEMA_LIST = SEED_ROWS.map((r) => r.slug) as string[];
 
 /**
+ * Cache en memoria del proceso server: empresa_id → timestamp UTC cuando se
+ * terminó la última verificación exitosa. TTL = 10 minutos.
+ *
+ * Antes: cada GET /api/cliente-tipos-servicio (form + admin) llamaba a
+ * ensureSemillasCatalogoTipos, que SIEMPRE hacia 1 SELECT (in slug systema)
+ * incluso si las 5 semillas ya estaban. Para una empresa que abre el modulo
+ * de clientes 50 veces al día = 50 SELECTs innecesarios.
+ *
+ * Con cache: solo 1 SELECT cada 10 min por empresa, sin importar cuántos GETs
+ * hagan. Si por algun motivo borraron una semilla manualmente, el cache se
+ * invalida al cumplir el TTL (no necesita reinicio del proceso).
+ */
+const SEMILLAS_CACHE = new Map<string, number>();
+const SEMILLAS_TTL_MS = 10 * 60 * 1000; // 10 minutos
+
+/**
  * Asegura que existan los 5 slugs de sistema (una fila por `empresa_id` + `slug`).
  * **Solo inserta** si falta; no hace `upsert` con nombre por defecto, porque eso
  * pisa en cada GET/PUT el `nombre` visible que el admin editó en DB.
+ *
+ * Memoizada por empresa con TTL 10min — ver comentario en SEMILLAS_CACHE.
  */
 export async function ensureSemillasCatalogoTipos(
   supabase: AppSupabaseClient,
   empresaId: string
 ): Promise<void> {
+  const cachedAt = SEMILLAS_CACHE.get(empresaId);
+  const now = Date.now();
+  if (cachedAt && now - cachedAt < SEMILLAS_TTL_MS) {
+    return; // ya verificado hace menos de 10min para esta empresa.
+  }
+
   const { data: present, error: e0 } = await supabase
     .from("cliente_tipos_servicio_catalogo")
     .select("slug")
@@ -113,7 +137,7 @@ export async function ensureSemillasCatalogoTipos(
     .in("slug", SLUGS_SISTEMA_LIST);
   if (e0) {
     console.error("[cliente_tipos_catalogo] ensureSemillas", e0.message);
-    return;
+    return; // NO cacheamos en caso de error: que el proximo GET reintente.
   }
   const have = new Set((present ?? []).map((r: { slug: string }) => r.slug));
   for (const r of SEED_ROWS) {
@@ -137,6 +161,11 @@ export async function ensureSemillasCatalogoTipos(
       have.add(r.slug);
     }
   }
+
+  // Marcar como verificado para esta empresa solo si llegamos hasta aca sin
+  // errores fatales del SELECT (los errores individuales de INSERT no invalidan
+  // el cache porque ya intentamos lo que se podia).
+  SEMILLAS_CACHE.set(empresaId, now);
 }
 
 export async function tipoServicioSlugValido(

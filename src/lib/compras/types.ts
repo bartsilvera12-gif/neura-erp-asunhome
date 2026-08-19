@@ -31,6 +31,22 @@ export interface Compra {
   plazo_dias?: number;           // solo si tipo_pago === "credito"
 
   nro_timbrado: string;
+  numero_factura?: string | null;
+  fecha_factura?: string | null; // YYYY-MM-DD, fecha de la factura del proveedor
+  observacion?: string | null;
+
+  // Comprobante/factura del proveedor (compartido por todas las líneas del numero_control).
+  comprobante_storage_path?: string | null;
+  comprobante_nombre?: string | null;
+  comprobante_mime_type?: string | null;
+
+  /** Trazabilidad: orden de compra que originó esta línea (si vino de "Recibir OC"). */
+  orden_compra_numero?: string | null;
+  orden_compra_item_id?: string | null;
 
   fecha: string;                 // ISO string, generado automáticamente
+
+  // Anulación (soft delete). Si anulada_at != null, la compra fue revertida.
+  anulada_at?: string | null;
+  anulada_motivo?: string | null;
 }

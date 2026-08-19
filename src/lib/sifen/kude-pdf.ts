@@ -74,10 +74,6 @@ function blendWithWhite(c: RGB, mix = 0.92): RGB {
   );
 }
 
-/** Contacto Neura en el KuDE (puede diferir del XML del emisor). */
-const NEURA_KUDE_TEL = "0973989068";
-const NEURA_KUDE_EMAIL = "neurautomations@gmail.com";
-
 /** Distancia desde el borde superior de la página hasta la línea base del texto (pt). */
 function baselineFromTop(page: PDFPage, fromTop: number): number {
   return page.getHeight() - fromTop;
@@ -112,7 +108,9 @@ function formatMonto(nStr: string, moneda: string): string {
 }
 
 function readLogoBytes(): Uint8Array | null {
-  const p = path.join(process.cwd(), "public", "logo-neura.png");
+  // Logo por defecto del KuDE = logo de Ferrecolor (bundle). Solo se usa si la
+  // empresa NO subió un logo propio en la config (kude_logo_path), que tiene prioridad.
+  const p = path.join(process.cwd(), "public", "logo-ferrecolor.png");
   try {
     if (fs.existsSync(p)) return new Uint8Array(fs.readFileSync(p));
   } catch {
@@ -275,7 +273,7 @@ export async function buildKudePdfBuffer(input: BuildKudePdfInput): Promise<Buff
 
   const pdfDoc = await PDFDocument.create();
   pdfDoc.setTitle(`KuDE — Factura ${numeroFactura}`);
-  pdfDoc.setAuthor("ASUNHOME ERP");
+  pdfDoc.setAuthor("Neura ERP");
 
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -331,11 +329,15 @@ export async function buildKudePdfBuffer(input: BuildKudePdfInput): Promise<Buff
   const leftTextX = margin + headerPad + (logoW > 0 ? logoW + 12 : 0);
   const leftMaxChars = Math.max(28, Math.floor((headerSplitX - leftTextX) / 4.2));
 
+  // Tel/Email del emisor: se toman del XML firmado (config SIFEN de la empresa),
+  // NO de constantes hardcodeadas. Si el emisor no tiene el dato, se omite la línea.
+  const telEmisor = (parsed.emisor.dTelEmi || "").trim();
+  const emailEmisor = (parsed.emisor.dEmailE || "").trim();
   const leftChunks: { lines: string[]; size: number; bold: boolean; col: RGB }[] = [
     { lines: wrapByChars(parsed.emisor.dNomEmi, leftMaxChars), size: 9, bold: true, col: BLACK },
     { lines: wrapByChars(parsed.emisor.dDirEmi, leftMaxChars), size: 7.5, bold: false, col: BLACK },
-    { lines: [`Tel.: ${NEURA_KUDE_TEL}`], size: 7.5, bold: false, col: BLACK },
-    { lines: [`Email: ${NEURA_KUDE_EMAIL}`], size: 7.5, bold: false, col: BLACK },
+    ...(telEmisor ? [{ lines: [`Tel.: ${telEmisor}`], size: 7.5, bold: false, col: BLACK }] : []),
+    ...(emailEmisor ? [{ lines: [`Email: ${emailEmisor}`], size: 7.5, bold: false, col: BLACK }] : []),
   ];
 
   const rightLines = 6;
@@ -708,7 +710,7 @@ export async function buildKudePdfBuffer(input: BuildKudePdfInput): Promise<Buff
     leg += legendLead;
   }
   leg += 2;
-  page.drawText("Generado con ASUNHOME ERP", {
+  page.drawText("Generado con Neura ERP", {
     x: margin + footPad,
     y: baselineFromTop(page, leg),
     size: 6.5,

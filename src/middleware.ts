@@ -1,11 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-/**
- * Refresca la sesión Supabase en cookies antes de Route Handlers / RSC.
- * Solo NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY (sin db.schema en getUser).
- */
 export async function middleware(request: NextRequest) {
+  // Assets estaticos: no hace falta refresh de sesion Supabase.
+  if (/\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|woff2?|ttf)$/i.test(request.nextUrl.pathname)) {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -36,10 +37,8 @@ export async function middleware(request: NextRequest) {
 
 /**
  * Excluir `/api/webhooks/*`: Meta hace GET sin cookies para verificar el webhook;
- * no debe pasar por refresh de sesión Supabase (y queda listo para proxies estrictos).
+ * no debe pasar por refresh de sesion Supabase.
  */
 export const config = {
-  matcher: [
-    "/((?!api/webhooks|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
-  ],
+  matcher: ["/((?!api/webhooks|_next/static|_next/image).*)"],
 };

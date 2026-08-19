@@ -195,6 +195,9 @@ export async function POST(request: NextRequest) {
       nombre_contacto,
       ruc,
       documento,
+      nombre_facturacion,
+      nivel_precio,
+      es_contribuyente,
       telefono,
       email,
       direccion,
@@ -217,6 +220,7 @@ export async function POST(request: NextRequest) {
       plan_comercial_id,
       vendedor_asignado,
       vendedor_usuario_id,
+      usa_nota_remision,
     } = body;
 
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -260,6 +264,13 @@ export async function POST(request: NextRequest) {
       nombre_contacto:      nombre_contacto.trim(),
       ruc:                  ruc?.trim() || null,
       documento:            documento?.trim() || null,
+      nombre_facturacion:   typeof nombre_facturacion === "string" && nombre_facturacion.trim()
+                              ? nombre_facturacion.trim().toUpperCase()
+                              : null,
+      nivel_precio:         ["minorista", "mayorista", "distribuidor"].includes(String(nivel_precio))
+                              ? String(nivel_precio)
+                              : "minorista",
+      es_contribuyente:     es_contribuyente === true,
       telefono:             telefono?.trim() || null,
       email:                email?.trim() || null,
       direccion:            direccion?.trim() || null,
@@ -270,6 +281,7 @@ export async function POST(request: NextRequest) {
       estado:               estado === "inactivo" ? "inactivo" : "activo",
       vendedor_asignado:    typeof vendedor_asignado === "string" && vendedor_asignado.trim() ? vendedor_asignado.trim() : null,
       vendedor_usuario_id:  vendedorUsuarioId,
+      usa_nota_remision:    usa_nota_remision === true,
     };
 
     if (typeof sifen_receptor_extranjero === "boolean") {

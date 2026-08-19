@@ -3,6 +3,7 @@ import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
 import { normalizeUpperText, normalizeUpperCodigoBarras } from "@/lib/text/normalize";
+import { applyTokenSearch } from "@/lib/productos/token-search";
 import type { AppSupabaseClient } from "@/lib/supabase/schema";
 
 /**
@@ -14,11 +15,17 @@ const PRODUCTO_COLS =
   "unidad_medida, metodo_valuacion, activo, created_at, updated_at, " +
   "codigo_barras, codigo_barras_interno, imagen_path, imagen_url, " +
   "categoria_principal_id, ubicacion_principal_id, proveedor_principal_id, " +
-  "es_vendible, es_insumo, controla_stock, valorizado, unidad_compra, unidad_receta, " +
-  "factor_compra_receta, tiempo_prep_minutos, descripcion";
+  "es_vendible, es_insumo, controla_stock, destacado, oferta_semana_destacada, valorizado, unidad_compra, unidad_receta, " +
+  "factor_compra_receta, tiempo_prep_minutos, descripcion, precio_mayorista, cantidad_minima_mayorista, precio_distribuidor, modo_receta, " +
+  "discount_type, discount_value, discount_starts_at, discount_ends_at";
 
 function toNumber(v: unknown): unknown {
   return typeof v === "string" ? Number(v) : v;
+}
+function toNumberOrNull(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 function rowToApi(r: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -28,6 +35,9 @@ function rowToApi(r: Record<string, unknown>): Record<string, unknown> {
     stock_actual: toNumber(r.stock_actual),
     stock_minimo: toNumber(r.stock_minimo),
     factor_compra_receta: toNumber(r.factor_compra_receta),
+    precio_mayorista: r.precio_mayorista != null ? toNumber(r.precio_mayorista) : null,
+    cantidad_minima_mayorista: r.cantidad_minima_mayorista != null ? toNumber(r.cantidad_minima_mayorista) : null,
+    precio_distribuidor: r.precio_distribuidor != null ? toNumber(r.precio_distribuidor) : null,
   };
 }
 
@@ -47,19 +57,83 @@ async function existsId(
   return (data ?? []).length > 0;
 }
 
+/**
+ * GET /api/productos
+ *
+ * Devuelve productos del tenant. Soporta paginacion + filtros server-side:
+ *  - q=<text>          Busqueda case-insensitive sobre nombre o sku
+ *  - categoria=<uuid>  Filtra por categoria_principal_id.
+ *                      Valor especial "__sin__" -> productos sin categoria.
+ *  - limit=<n>         Tamano de pagina (default 25, max 500). 0 = sin limite.
+ *  - offset=<n>        Offset de paginacion.
+ *
+ * Response: { productos: [...], total: number, limit, offset }
+ */
 export async function GET(request: NextRequest) {
   try {
     const ctx = await getTenantSupabaseFromAuth(request);
     if (!ctx) return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
-    const { data, error } = await ctx.supabase
-      .from("productos")
-      .select(PRODUCTO_COLS)
-      .eq("empresa_id", ctx.auth.empresa_id)
-      .eq("activo", true)
-      .order("nombre");
-    if (error) throw new Error(error.message);
-    const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map(rowToApi);
-    return NextResponse.json(successResponse({ productos: rows }));
+    const { searchParams } = new URL(request.url);
+
+    const q = searchParams.get("q")?.trim() ?? "";
+    const categoria = searchParams.get("categoria");
+    // Default sin paginar (limit=0) para preservar compat con callers que
+    // esperan la lista completa (recetas, ventas, etc.). El listado del ERP
+    // pasa limit explicito cuando quiere paginacion.
+    const limitParam = searchParams.get("limit");
+    const limitRaw = limitParam !== null ? parseInt(limitParam, 10) : 0;
+    const offsetRaw = parseInt(searchParams.get("offset") ?? "0", 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(0, limitRaw), 500) : 0;
+    const offset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
+
+    /** Construye el query base con todos los filtros comunes. Se re-crea por
+     *  cada chunk porque los builders de supabase-js no son reutilizables una
+     *  vez ejecutados. */
+    const buildBase = () => {
+      let base = ctx.supabase
+        .from("productos")
+        .select(PRODUCTO_COLS, {
+          // count: "planned" usa pg_stats en vez de COUNT(*) exacto.
+          count: "planned",
+        })
+        .eq("empresa_id", ctx.auth.empresa_id)
+        .eq("activo", true);
+      if (q) base = applyTokenSearch(base, q, ["nombre", "sku"]);
+      if (categoria === "__sin__") base = base.is("categoria_principal_id", null);
+      else if (categoria) base = base.eq("categoria_principal_id", categoria);
+      return base.order("nombre");
+    };
+
+    if (limit > 0) {
+      const { data, error, count } = await buildBase().range(offset, offset + limit - 1);
+      if (error) throw new Error(error.message);
+      const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map(rowToApi);
+      return NextResponse.json(
+        successResponse({ productos: rows, total: count ?? 0, limit, offset })
+      );
+    }
+
+    // limit=0 = "sin paginar". PostgREST/Supabase cortan silenciosamente a 1000
+    // filas aunque pasemos un range mas grande (max-rows a nivel servidor).
+    // Solucion: fetch por lotes de 1000 hasta agotar. Asi tenants con >1000
+    // productos (Ferrecolor con miles) devuelven todo.
+    const CHUNK = 1000;
+    const MAX_TOTAL = 100_000; // guard-rail
+    const allRows: Record<string, unknown>[] = [];
+    let totalCount = 0;
+    for (let from = 0; from < MAX_TOTAL; from += CHUNK) {
+      const { data, error, count } = await buildBase().range(from, from + CHUNK - 1);
+      if (error) throw new Error(error.message);
+      const batch = (data ?? []) as unknown as Record<string, unknown>[];
+      if (batch.length === 0) break;
+      allRows.push(...batch);
+      if (count != null) totalCount = count;
+      if (batch.length < CHUNK) break;
+    }
+    const rows = allRows.map(rowToApi);
+    return NextResponse.json(
+      successResponse({ productos: rows, total: totalCount || rows.length, limit, offset })
+    );
   } catch (err) {
     console.error("[/api/productos GET]", err instanceof Error ? err.message : err);
     return NextResponse.json(errorResponse("No se pudieron cargar los productos."), { status: 500 });
@@ -104,6 +178,30 @@ export async function POST(request: NextRequest) {
     const esVendible = typeof body.es_vendible === "boolean" ? body.es_vendible : undefined;
     const esInsumo = typeof body.es_insumo === "boolean" ? body.es_insumo : undefined;
     const controlaStock = typeof body.controla_stock === "boolean" ? body.controla_stock : undefined;
+    const destacado = typeof body.destacado === "boolean" ? body.destacado : undefined;
+    const discountType =
+      body.discount_type === "percentage" || body.discount_type === "fixed"
+        ? body.discount_type
+        : body.discount_type === null || body.discount_type === ""
+        ? null
+        : undefined;
+    const discountValueRaw = toNumber(body.discount_value);
+    const discountValue =
+      typeof discountValueRaw === "number" && discountValueRaw >= 0
+        ? discountValueRaw
+        : undefined;
+    const discountStartsAt =
+      typeof body.discount_starts_at === "string" && body.discount_starts_at.trim()
+        ? body.discount_starts_at
+        : body.discount_starts_at === null
+        ? null
+        : undefined;
+    const discountEndsAt =
+      typeof body.discount_ends_at === "string" && body.discount_ends_at.trim()
+        ? body.discount_ends_at
+        : body.discount_ends_at === null
+        ? null
+        : undefined;
     const valorizado = typeof body.valorizado === "boolean" ? body.valorizado : undefined;
     const unidadCompra =
       typeof body.unidad_compra === "string"
@@ -157,6 +255,11 @@ export async function POST(request: NextRequest) {
     if (esVendible !== undefined) insertPayload.es_vendible = esVendible;
     if (esInsumo !== undefined) insertPayload.es_insumo = esInsumo;
     if (controlaStock !== undefined) insertPayload.controla_stock = controlaStock;
+    if (destacado !== undefined) insertPayload.destacado = destacado;
+    if (discountType !== undefined) insertPayload.discount_type = discountType;
+    if (discountValue !== undefined) insertPayload.discount_value = discountValue;
+    if (discountStartsAt !== undefined) insertPayload.discount_starts_at = discountStartsAt;
+    if (discountEndsAt !== undefined) insertPayload.discount_ends_at = discountEndsAt;
     if (valorizado !== undefined) insertPayload.valorizado = valorizado;
     if (unidadCompra !== undefined) insertPayload.unidad_compra = unidadCompra;
     if (unidadReceta !== undefined) insertPayload.unidad_receta = unidadReceta;
@@ -164,6 +267,12 @@ export async function POST(request: NextRequest) {
     if (tiempoPrepMinutos !== undefined) insertPayload.tiempo_prep_minutos = tiempoPrepMinutos;
     const descripcion = typeof body.descripcion === "string" ? body.descripcion.trim() || null : (body.descripcion === null ? null : undefined);
     if (descripcion !== undefined) insertPayload.descripcion = descripcion;
+    insertPayload.precio_mayorista = toNumberOrNull(body.precio_mayorista);
+    insertPayload.cantidad_minima_mayorista = toNumberOrNull(body.cantidad_minima_mayorista);
+    insertPayload.precio_distribuidor = toNumberOrNull(body.precio_distribuidor);
+    if (body.modo_receta === "produccion_previa" || body.modo_receta === "preparado_al_vender") {
+      insertPayload.modo_receta = body.modo_receta;
+    }
 
     const ins = await sb.from("productos").insert(insertPayload).select(PRODUCTO_COLS).single();
     if (ins.error) {
@@ -186,6 +295,27 @@ export async function POST(request: NextRequest) {
     }
     const row = ins.data as unknown as Record<string, unknown>;
     const productoId = String(row.id);
+
+    // Sembrar presentacion default "Unidad" cantidad_base=1. Best-effort:
+    // si falla, el producto se crea igual. El sidebar de presentaciones en
+    // editar producto la ofrece crear si no existe. Mantiene la invariante
+    // de que cada producto tiene al menos una presentacion activa.
+    try {
+      const { ensureDefaultPresentacion } = await import(
+        "@/lib/inventario/presentaciones-server"
+      );
+      await ensureDefaultPresentacion(
+        sb,
+        empresaId,
+        productoId,
+        typeof row.unidad_medida === "string" ? row.unidad_medida : null
+      );
+    } catch (e) {
+      console.error(
+        "[/api/productos POST] ensureDefaultPresentacion",
+        e instanceof Error ? e.message : e
+      );
+    }
 
     // Movimiento de inventario inicial — solo si controla_stock=true Y stock>0
     let movWarning: string | null = null;

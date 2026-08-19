@@ -6,6 +6,7 @@ import { getProveedores } from "@/lib/proveedores/storage";
 import ExportExcelButton from "@/components/ui/ExportExcelButton";
 import ImportExcelButton from "@/components/ui/ImportExcelButton";
 import { useIsAdmin } from "@/lib/auth/use-is-admin";
+import { productoMatchesQuery } from "@/lib/productos/token-search";
 import type { Proveedor } from "@/lib/proveedores/types";
 
 export default function ProveedoresPage() {
@@ -30,16 +31,10 @@ export default function ProveedoresPage() {
   }, [refreshKey]);
 
   const filtradas = useMemo(() => {
-    const t = busqueda.trim().toLowerCase();
-    if (!t) return lista;
+    if (!busqueda.trim()) return lista;
     return lista.filter((p) => {
-      const cats = (p.categorias ?? []).map((c) => c.nombre.toLowerCase()).join(" ");
-      return (
-        p.nombre.toLowerCase().includes(t) ||
-        (p.ruc ?? "").toLowerCase().includes(t) ||
-        (p.email ?? "").toLowerCase().includes(t) ||
-        cats.includes(t)
-      );
+      const cats = (p.categorias ?? []).map((c) => c.nombre).join(" ");
+      return productoMatchesQuery(busqueda, p.nombre, p.ruc, p.email, cats);
     });
   }, [lista, busqueda]);
 

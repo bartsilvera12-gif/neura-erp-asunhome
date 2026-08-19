@@ -13,7 +13,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import type { CSSProperties, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 import { readSaasBriefData } from "@/lib/proyectos/brief-data";
 import ProyectoDetalleModal from "./components/ProyectoDetalleModal";
@@ -273,6 +273,45 @@ export default function ProyectosKanbanClient() {
     useSensor(KeyboardSensor)
   );
 
+  // Las opciones no-críticas (tipos, usuarios, prioridades) son config estática:
+  // no dependen de los filtros y solo alimentan selects + estilos de badge.
+  // Se cargan UNA sola vez y nunca bloquean el render del tablero. Esto evita
+  // refetch en cada cambio de filtro y, sobre todo, que un endpoint lento/caído
+  // (ej. /prioridades vía pool PG directo) congele el kanban en "Cargando…".
+  const opcionesCargadasRef = useRef(false);
+
+  const cargarOpcionesNoCriticas = useCallback(async () => {
+    if (opcionesCargadasRef.current) return;
+    opcionesCargadasRef.current = true;
+    try {
+      const [rTipos, rUsers, rPrioridades] = await Promise.all([
+        fetchWithSupabaseSession("/api/proyectos/tipos", { cache: "no-store" }),
+        fetchWithSupabaseSession("/api/usuarios/empresa-activos", { cache: "no-store" }),
+        fetchWithSupabaseSession("/api/configuracion/proyectos/prioridades", { cache: "no-store" }),
+      ]);
+      const jTipos = (await rTipos.json().catch(() => ({}))) as {
+        success?: boolean;
+        data?: { id: string; nombre: string }[];
+      };
+      const jUsers = (await rUsers.json().catch(() => ({}))) as { usuarios?: { id: string; nombre?: string }[] };
+      const jPrioridades = (await rPrioridades.json().catch(() => ({}))) as {
+        success?: boolean;
+        data?: { prioridades?: PrioridadConfig[] };
+      };
+      if (jTipos.success && jTipos.data) setTipoOpts(jTipos.data);
+      if (jUsers.usuarios) setUserOpts(jUsers.usuarios);
+      if (rPrioridades.ok && jPrioridades.success && jPrioridades.data?.prioridades) {
+        setPrioridadesConfig(jPrioridades.data.prioridades);
+      } else {
+        // Sin config válida usamos los estilos de prioridad por defecto (fallback del componente).
+        setPrioridadesConfig([]);
+      }
+    } catch {
+      // No-crítico: el tablero ya está visible; los selects quedan con sus defaults.
+      opcionesCargadasRef.current = false; // permitir reintento en el próximo load
+    }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
@@ -283,25 +322,14 @@ export default function ProyectosKanbanClient() {
     if (filtroRc) sp.set("responsable_comercial_id", filtroRc);
     if (filtroRt) sp.set("responsable_tecnico_id", filtroRt);
 
-    const [rEst, rPr, rTipos, rUsers, rPrioridades] = await Promise.all([
+    // Camino crítico: el tablero solo necesita estados + proyectos para pintar.
+    const [rEst, rPr] = await Promise.all([
       fetchWithSupabaseSession("/api/proyectos/estados", { cache: "no-store" }),
       fetchWithSupabaseSession(`/api/proyectos?${sp.toString()}`, { cache: "no-store" }),
-      fetchWithSupabaseSession("/api/proyectos/tipos", { cache: "no-store" }),
-      fetchWithSupabaseSession("/api/usuarios/empresa-activos", { cache: "no-store" }),
-      fetchWithSupabaseSession("/api/configuracion/proyectos/prioridades", { cache: "no-store" }),
     ]);
 
     const jEst = (await rEst.json().catch(() => ({}))) as { success?: boolean; data?: EstadoRow[]; error?: string };
     const jPr = (await rPr.json().catch(() => ({}))) as { success?: boolean; data?: ProyectoCard[]; error?: string };
-    const jTipos = (await rTipos.json().catch(() => ({}))) as {
-      success?: boolean;
-      data?: { id: string; nombre: string }[];
-    };
-    const jUsers = (await rUsers.json().catch(() => ({}))) as { usuarios?: { id: string; nombre?: string }[] };
-    const jPrioridades = (await rPrioridades.json().catch(() => ({}))) as {
-      success?: boolean;
-      data?: { prioridades?: PrioridadConfig[] };
-    };
 
     if (!rEst.ok || !jEst.success) {
       setErr(jEst.error ?? "No se pudieron cargar estados");
@@ -315,17 +343,11 @@ export default function ProyectosKanbanClient() {
     }
     setEstados(jEst.data ?? []);
     setProyectos(jPr.data ?? []);
-
-    if (jTipos.success && jTipos.data) setTipoOpts(jTipos.data);
-    if (jUsers.usuarios) setUserOpts(jUsers.usuarios);
-    if (rPrioridades.ok && jPrioridades.success && jPrioridades.data?.prioridades) {
-      setPrioridadesConfig(jPrioridades.data.prioridades);
-    } else {
-      setPrioridadesConfig([]);
-    }
-
     setLoading(false);
-  }, [q, filtroEstado, filtroTipo, filtroRc, filtroRt]);
+
+    // No-críticas en segundo plano: no bloquean el render del tablero.
+    void cargarOpcionesNoCriticas();
+  }, [q, filtroEstado, filtroTipo, filtroRc, filtroRt, cargarOpcionesNoCriticas]);
 
   useEffect(() => {
     void load();
@@ -462,7 +484,7 @@ export default function ProyectosKanbanClient() {
   }
 
   return (
-    <div className="mx-auto max-w-[1800px] space-y-4 p-4 md:p-6">
+    <div className="mx-auto max-w-[1800px] space-y-4 p-0 lg:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -478,9 +500,9 @@ export default function ProyectosKanbanClient() {
           <h1 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Pedidos</h1>
           <p className="mt-0.5 text-xs text-slate-500">Tablero de cocina — pedidos por modalidad y estado.</p>
         </div>
-        <div className="flex items-center">
+        <div className="flex w-full items-center sm:w-auto">
           <input
-            className="w-72 rounded-md border border-slate-200 px-3 py-1.5 text-sm"
+            className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm sm:w-72"
             placeholder="Buscar título o cliente…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -505,8 +527,14 @@ export default function ProyectosKanbanClient() {
       </div>
 
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <div className="max-h-[calc(100vh-260px)] min-h-[520px] overflow-y-auto overflow-x-hidden rounded-xl pb-4">
-          <div className="flex min-h-full gap-2 w-full">
+        {/* Antes: "overflow-x-hidden" bloqueaba el scroll horizontal del kanban,
+            las columnas se comprimian a flex-1 y en mobile quedaban ilegibles
+            (texto de tarjetas cortado, no se ven todas las columnas).
+            Ahora: "overflow-auto" cubre X+Y, cada KanbanColumnView tiene
+            min-w-[260px] fijo (no flex-1), el contenedor crece con el contenido
+            y el usuario puede deslizar de izquierda a derecha. */}
+        <div className="max-h-[calc(100svh-300px)] min-h-[420px] overflow-auto rounded-xl pb-4 overscroll-x-contain sm:min-h-[520px] lg:max-h-[calc(100vh-260px)]">
+          <div className="flex min-h-full gap-2">
             {kanbanColumns.map((col) => {
               const items = byColumn.get(col.id) ?? [];
               return (
@@ -584,7 +612,11 @@ function KanbanColumnView({ col, children }: KanbanColumnViewProps) {
   return (
     <div
       ref={setNodeRef}
-      className={`flex min-w-[120px] flex-1 flex-col rounded-lg border bg-slate-50/80 transition-colors ${
+      // Antes: "min-w-[120px] flex-1" => columnas compartian el ancho disponible,
+      // imposibles de leer en mobile. Ahora: ancho fijo de 260px (sin flex-1)
+      // para que el contenedor scrollee horizontalmente con todas las columnas
+      // legibles. shrink-0 evita que se compriman.
+      className={`flex w-[82vw] max-w-[320px] shrink-0 flex-col rounded-lg border bg-slate-50/80 transition-colors sm:w-[300px] lg:w-[260px] ${
         isOver && !col.inactiveFallback
           ? "border-indigo-300 bg-indigo-50/70 ring-2 ring-indigo-100"
           : "border-slate-200"

@@ -6,13 +6,14 @@
   --foreground: #0F172A;
   --foreground-muted: #475569;
   --card: #FFFFFF;
-  /* Sidebar Zentra: deep teal #0B3A3D con elevated #104A4E. */
+  /* Sidebar Zentra — teal oficial: deep teal oscuro con acento turquesa. */
   --zentra-sidebar: #0B3A3D;
   --zentra-sidebar-elevated: #104A4E;
   --zentra-sidebar-border: rgba(255, 255, 255, 0.08);
   --zentra-sidebar-hover: rgba(255, 255, 255, 0.06);
   --zentra-sidebar-active: rgba(255, 255, 255, 0.18);
   --zentra-sidebar-accent: #4FAEB2;
+  --zentra-sidebar-active-text: #FFFFFF;
   --zentra-login-bg-mid: #145053;
   --zentra-login-bg-deep: #0a3437;
   --sidebar: var(--zentra-sidebar);
@@ -28,6 +29,11 @@
   --badge-warning-text: #854D0E;
   --badge-error-bg: #FEE2E2;
   --badge-error-text: #991B1B;
+  /* Tokens premium — sombras suaves, radios y ring turquesa reutilizables. */
+  --shadow-card: 0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 1px 3px 0 rgba(15, 23, 42, 0.05);
+  --shadow-pop: 0 12px 32px -12px rgba(15, 23, 42, 0.20);
+  --radius-card: 0.875rem;
+  --ring-primary: rgba(79, 174, 178, 0.30);
 }
 
 .dark {
@@ -170,6 +176,51 @@ body {
 }
 
 /* =============================================================================
+   Sidebar scrollbar — combinado con la paleta teal del menú lateral.
+   Track casi invisible (deja ver el gradient), thumb turquesa con transparencia
+   que se intensifica en hover. Aplicar a cualquier scroll container dentro del
+   sidebar oscuro.
+
+   Firefox: scrollbar-width / scrollbar-color (estándar CSS).
+   Chrome/Safari/Edge: ::-webkit-scrollbar (pseudo-elementos).
+   ============================================================================= */
+.zentra-sidebar-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* WebKit (Chrome, Safari, Edge nuevo) */
+.zentra-sidebar-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.zentra-sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px 0;
+}
+
+.zentra-sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(79, 174, 178, 0.35);
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 0.2s ease;
+}
+
+.zentra-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(79, 174, 178, 0.65);
+}
+
+.zentra-sidebar-scroll::-webkit-scrollbar-thumb:active {
+  background-color: rgba(79, 174, 178, 0.85);
+}
+
+.zentra-sidebar-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* =============================================================================
    Dashboard — shell oscuro teal estilo Zentra
    ============================================================================= */
 /* =============================================================================
@@ -219,6 +270,40 @@ body {
   background:
     radial-gradient(ellipse 80% 40% at 50% 0%, rgba(79, 174, 178, 0.06), transparent 60%),
     #F8FAFC;
+}
+
+/* =============================================================================
+   Selects nativos — tratamiento premium global (Bloque 3 QA 2026)
+   Reemplaza la flecha del SO por un chevron consistente y unifica el focus a
+   turquesa SIN tocar el JSX de los ~61 <select> de la app. Las utilidades
+   Tailwind de cada select (bg/borde/padding propios) siguen ganando por mayor
+   especificidad; esto solo rellena lo que no esté definido + el chevron + focus.
+   ============================================================================= */
+select:not([multiple]):not([size]) {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%234FAEB2' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 1.05rem 1.05rem;
+  padding-right: 2.1rem;
+  cursor: pointer;
+}
+
+/* Focus turquesa unificado para controles de formulario (donde no haya un focus
+   propio más específico). Mejora la coherencia sin romper estilos existentes. */
+select:focus-visible,
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: #4FAEB2;
+  box-shadow: 0 0 0 3px var(--ring-primary);
+}
+
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 

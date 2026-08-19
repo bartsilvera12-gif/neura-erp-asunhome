@@ -154,7 +154,7 @@ export default function NuevoSorteoPage() {
             onChange={(e) => setDescripcion(e.target.value)}
           />
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Precio por boleto (₲)</label>
             <input
@@ -183,7 +183,7 @@ export default function NuevoSorteoPage() {
             />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Fecha del sorteo</label>
             <input

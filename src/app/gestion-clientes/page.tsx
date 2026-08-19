@@ -16,6 +16,7 @@ import {
 import { ModalCambioPlanGestion } from "@/components/gestion-clientes/ModalCambioPlanGestion";
 import { ModalHistorialClienteGestion } from "@/components/gestion-clientes/ModalHistorialClienteGestion";
 import { RegistrarPagoModal } from "@/components/pagos/RegistrarPagoModal";
+import { EstadoCuentaClienteBlock } from "@/components/cobros/EstadoCuentaClienteBlock";
 import { SifenEstadoBadge } from "@/components/sifen/SifenEstadoBadge";
 import { useFacturaSifenEstados } from "@/hooks/useFacturaSifenEstados";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
@@ -985,6 +986,11 @@ function GestionClientesPageInner() {
                 </div>
               </section>
 
+              {/* Estado de cuenta (nueva lógica: cuentas por cobrar de ventas a crédito + cobros) */}
+              <EstadoCuentaClienteBlock clienteId={selected.id} />
+
+              {/* Bloque legacy de facturas (planes/SIFEN): solo se muestra si el cliente tiene facturas. */}
+              {facturas.length > 0 ? (
               <section>
                 <button
                   type="button"
@@ -1188,6 +1194,7 @@ function GestionClientesPageInner() {
                   </div>
                 ) : null}
               </section>
+              ) : null}
             </div>
           </div>
         )}

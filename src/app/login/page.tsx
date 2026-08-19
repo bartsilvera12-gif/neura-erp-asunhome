@@ -38,7 +38,22 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/");
+    // Redirección por rol: vendedores/asesores/comerciales arrancan en Caja
+    // (no tienen acceso al dashboard). Admin/supervisor/usuario → home.
+    let target = "/";
+    try {
+      const res = await fetch("/api/usuarios/me", { cache: "no-store" });
+      if (res.ok) {
+        const json = await res.json();
+        const rol = String(json?.usuario?.rol ?? "").trim().toLowerCase();
+        if (["vendedor", "asesor", "comercial", "asesor comercial"].includes(rol)) {
+          target = "/ventas";
+        }
+      }
+    } catch {
+      // si falla la resolucion de rol, cae al default "/"
+    }
+    router.push(target);
   }
 
   return (

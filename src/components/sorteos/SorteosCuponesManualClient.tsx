@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
+import { fetchWithSupabaseSession, isAbortError } from "@/lib/api/fetch-with-supabase-session";
 
 type SorteoListItem = {
   id: string;
@@ -44,27 +44,32 @@ export default function SorteosCuponesManualClient() {
 
   useEffect(() => {
     if (!open) return;
-    let cancelled = false;
+    // AbortController: si el modal se cierra mid-fetch, abortamos.
+    // Modales se abren y cierran rapido — patron critico para evitar
+    // setState-after-unmount y race conditions con multiples aperturas.
+    const ctrl = new AbortController();
     (async () => {
       setLoadErr(null);
       try {
-        const res = await fetchWithSupabaseSession("/api/sorteos", { cache: "no-store" });
+        const res = await fetchWithSupabaseSession("/api/sorteos", {
+          cache: "no-store",
+          signal: ctrl.signal,
+        });
+        if (ctrl.signal.aborted) return;
         const json = (await res.json()) as { success?: boolean; data?: SorteoListItem[] };
+        if (ctrl.signal.aborted) return;
         if (!res.ok || !json.success || !Array.isArray(json.data)) {
           setLoadErr("No se pudieron cargar los sorteos.");
           return;
         }
-        if (!cancelled) {
-          const activos = json.data.filter((s) => (s.estado ?? "activo") === "activo");
-          setSorteos(activos.length > 0 ? activos : json.data);
-        }
-      } catch {
-        if (!cancelled) setLoadErr("Error de red al cargar sorteos.");
+        const activos = json.data.filter((s) => (s.estado ?? "activo") === "activo");
+        setSorteos(activos.length > 0 ? activos : json.data);
+      } catch (e) {
+        if (isAbortError(e)) return;
+        setLoadErr("Error de red al cargar sorteos.");
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => ctrl.abort();
   }, [open]);
 
   useEffect(() => {

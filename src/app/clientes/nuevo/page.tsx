@@ -27,6 +27,16 @@ import type { ClienteTipoServicioRow } from "@/lib/clientes/tipo-servicio-catalo
 import { filasTiposDesdeSistemaEstatico, fetchTiposFormCliente } from "@/lib/clientes/fetch-tipos-servicio-form";
 import type { Plan } from "@/lib/planes/types";
 
+/**
+ * Ferrecolor usa el formulario de clientes SIMPLE (ferretería): oculta los campos
+ * SaaS/Neura que no aplican (Tipo de servicio Marketing/SaaS/Branding/Web, Plan,
+ * vendedor responsable, suscripción mensual, y el override manual de receptor SIFEN).
+ * Para facturar B2B alcanza con el RUC del cliente: el receptor SIFEN se detecta
+ * automáticamente del RUC/documento. Empresa muestra RUC; el modal rápido de la
+ * Caja tiene el toggle contribuyente + RUC para personas.
+ */
+const SIMPLE_CLIENTE = true;
+
 // ── Estilos ────────────────────────────────────────────────────────────────────
 
 const inputClass =
@@ -59,8 +69,11 @@ function NuevoClienteForm() {
     tipo_cliente:        "empresa" as TipoCliente,
     empresa:             "",
     nombre_contacto:     "",
+    nombre_facturacion:  "",
+    nivel_precio:        "minorista" as "minorista" | "mayorista" | "distribuidor",
     ruc:                 "",
     documento:           "",
+    es_contribuyente:    false,
     telefono:            "",
     telefono_secundario: "",
     email:               "",
@@ -80,6 +93,7 @@ function NuevoClienteForm() {
     prospecto_id:          null as string | null,
     tipo_servicio_cliente: "" as string,
     estado:                "activo" as "activo" | "inactivo",
+    usa_nota_remision:     false,
     sifen_receptor_manual: false,
     sifen_receptor_naturaleza: "" as string,
     sifen_ti_ope: "" as string,
@@ -194,7 +208,7 @@ function NuevoClienteForm() {
     return () => { cancelled = true; };
   }, [fromCrmId]);
 
-  const upper = ["empresa", "nombre_contacto", "ciudad", "pais", "vendedor_asignado", "condicion_pago", "direccion", "sifen_codigo_pais"];
+  const upper = ["empresa", "nombre_contacto", "nombre_facturacion", "ciudad", "pais", "vendedor_asignado", "condicion_pago", "direccion", "sifen_codigo_pais"];
   const lower = ["email", "email_secundario"];
 
   function handleChange(
@@ -302,6 +316,9 @@ function NuevoClienteForm() {
           }
         : {};
 
+    // Facturación B2B: alcanza con cargar el RUC del cliente. El receptor SIFEN se
+    // detecta AUTOMÁTICAMENTE del RUC (contribuyente) — NO forzamos el modo manual,
+    // que exigiría además el tipo de operación (iTiOpe) y rompería la emisión del DE.
     setGuardando(true);
 
     const creado = await apiCreateCliente({
@@ -309,8 +326,11 @@ function NuevoClienteForm() {
       tipo_servicio_cliente: form.tipo_servicio_cliente || undefined,
       empresa: form.tipo_cliente === "empresa" ? form.empresa.trim().toUpperCase() : undefined,
       nombre_contacto: form.nombre_contacto.trim().toUpperCase(),
+      nombre_facturacion: form.nombre_facturacion.trim().toUpperCase() || null,
+      nivel_precio: form.nivel_precio,
       ruc: form.ruc.trim() || undefined,
       documento: form.documento.trim() || undefined,
+      es_contribuyente: form.tipo_cliente === "persona" ? form.es_contribuyente : false,
       telefono: form.telefono.trim() || undefined,
       email: form.email.trim() || undefined,
       direccion: form.direccion.trim() || undefined,
@@ -319,6 +339,7 @@ function NuevoClienteForm() {
       condicion_pago: form.condicion_pago.trim().toUpperCase() || undefined,
       moneda_preferida: form.moneda_preferida,
       estado: form.estado,
+      usa_nota_remision: form.usa_nota_remision,
       plan_comercial_id: formSusc.plan_id.trim() || null,
       vendedor_asignado: form.vendedor_asignado.trim().toUpperCase() || undefined,
       vendedor_usuario_id: form.vendedor_usuario_id.trim() || null,
@@ -452,6 +473,48 @@ function NuevoClienteForm() {
             )}
 
             <div>
+              <label className={labelClass}>
+                Nombre para facturación <span className="text-gray-400 font-normal">(opcional)</span>
+              </label>
+              <input
+                type="text"
+                name="nombre_facturacion"
+                value={form.nombre_facturacion}
+                onChange={handleChange}
+                placeholder="Ej: Nombre del cónyuge / hijo/a"
+                className={`${inputClass} uppercase`}
+              />
+              <p className="mt-1.5 text-xs text-gray-400">
+                Solo si la factura se emite a un nombre distinto de la Razón Social. Si queda vacío, se usa
+                la Razón Social o el nombre de contacto.
+              </p>
+            </div>
+
+            <div>
+              <label className={labelClass}>Nivel de precio</label>
+              <select
+                name="nivel_precio"
+                value={form.nivel_precio}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    nivel_precio: e.target.value as "minorista" | "mayorista" | "distribuidor",
+                  }))
+                }
+                className={inputClass}
+              >
+                <option value="minorista">Minorista</option>
+                <option value="mayorista">Mayorista</option>
+                <option value="distribuidor">Distribuidor</option>
+              </select>
+              <p className="mt-1.5 text-xs text-gray-400">
+                Se usa como precio por defecto al agregar productos en presupuestos, pedidos y ventas.
+                Igual se puede cambiar en cada línea.
+              </p>
+            </div>
+
+            {!SIMPLE_CLIENTE && (
+            <div>
               <label className={labelClass}>Tipo de servicio</label>
               <select
                 name="tipo_servicio_cliente"
@@ -467,6 +530,7 @@ function NuevoClienteForm() {
                 ))}
               </select>
             </div>
+            )}
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
@@ -509,6 +573,48 @@ function NuevoClienteForm() {
                 )}
               </div>
             </div>
+            {form.tipo_cliente === "persona" && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <label className="flex items-start gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    name="es_contribuyente"
+                    checked={form.es_contribuyente}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setForm((prev) => ({
+                        ...prev,
+                        es_contribuyente: checked,
+                        ruc: checked ? prev.ruc : "",
+                      }));
+                    }}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#0EA5E9] focus:ring-[#0EA5E9]"
+                  />
+                  <span>
+                    <span className="font-medium">Es contribuyente inscripto en la SET</span>
+                    <span className="mt-0.5 block text-xs text-slate-500">
+                      Marcalo solo si esta persona está registrada como contribuyente en Marangatu. Con esta opción activada y RUC cargado, la factura sale como B2B (evita el rechazo 0301 de la SET).
+                    </span>
+                  </span>
+                </label>
+                {form.es_contribuyente && (
+                  <div className="mt-3">
+                    <label className={labelClass}>RUC de la persona</label>
+                    <input
+                      type="text"
+                      name="ruc"
+                      value={form.ruc}
+                      onChange={handleChange}
+                      placeholder="Ej: 2431868-0"
+                      className={inputClass}
+                    />
+                    <p className="mt-1 text-xs text-slate-500">
+                      En Paraguay el RUC de persona física es la CI + dígito verificador.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </section>
 
           {/* ── Contacto ─────────────────────────────────────────────────── */}
@@ -577,6 +683,17 @@ function NuevoClienteForm() {
               />
             </div>
 
+            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={form.usa_nota_remision}
+                onChange={(e) => setForm((p) => ({ ...p, usa_nota_remision: e.target.checked }))}
+                className="h-4 w-4 rounded border-slate-300 text-[#0EA5E9] focus:ring-[#0EA5E9]"
+              />
+              Usa nota de remisión
+              <span className="text-xs text-slate-400">(se generará junto al ticket al venderle)</span>
+            </label>
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className={labelClass}>Ciudad</label>
@@ -601,6 +718,7 @@ function NuevoClienteForm() {
               </div>
             </div>
 
+            {!SIMPLE_CLIENTE && (
             <ClienteDatosSifenReceptorForm
               value={{
                 sifen_receptor_manual: form.sifen_receptor_manual,
@@ -667,13 +785,14 @@ function NuevoClienteForm() {
                 });
               }}
             />
+            )}
           </section>
 
           {/* ── Datos comerciales ────────────────────────────────────────── */}
           <section className="space-y-4">
             <SectionTitle>Datos comerciales</SectionTitle>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className={`grid gap-4 ${SIMPLE_CLIENTE ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-3"}`}>
               <div>
                 <label className={labelClass}>Condición de pago</label>
                 <select
@@ -687,7 +806,7 @@ function NuevoClienteForm() {
                   <option value="30 DÍAS">30 días</option>
                   <option value="60 DÍAS">60 días</option>
                   <option value="90 DÍAS">90 días</option>
-                  <option value="MENSUAL">Mensual</option>
+                  {!SIMPLE_CLIENTE && <option value="MENSUAL">Mensual</option>}
                 </select>
               </div>
               <div>
@@ -702,6 +821,7 @@ function NuevoClienteForm() {
                   <option value="USD">Dólares (USD)</option>
                 </select>
               </div>
+              {!SIMPLE_CLIENTE && (
               <div>
                 <label className={labelClass}>Vendedor responsable (usuario ERP)</label>
                 <select
@@ -723,6 +843,8 @@ function NuevoClienteForm() {
                   <p className="mt-1 text-xs text-slate-500">No hay usuarios activos disponibles para asignar.</p>
                 ) : null}
               </div>
+              )}
+              {!SIMPLE_CLIENTE && (
               <div>
                 <label className={labelClass}>Vendedor asignado (texto libre)</label>
                 <input
@@ -734,9 +856,11 @@ function NuevoClienteForm() {
                   className={`${inputClass} uppercase`}
                 />
               </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {!SIMPLE_CLIENTE && (
               <div>
                 <label className={labelClass}>Origen del cliente</label>
                 <select
@@ -751,6 +875,7 @@ function NuevoClienteForm() {
                   <option value="VENTA">Venta</option>
                 </select>
               </div>
+              )}
               <div>
                 <label className={labelClass}>Estado inicial</label>
                 <select
@@ -765,6 +890,7 @@ function NuevoClienteForm() {
               </div>
             </div>
 
+            {!SIMPLE_CLIENTE && (
             <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-4">
               <SectionTitle>Plan</SectionTitle>
               <div>
@@ -790,6 +916,7 @@ function NuevoClienteForm() {
                 </select>
               </div>
             </div>
+            )}
 
             {/* Campos factura inicial Contado */}
             {form.condicion_pago === "CONTADO" && (

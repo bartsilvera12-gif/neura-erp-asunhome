@@ -1,590 +1,329 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { enRangoCalendario, rangoDesdeHastaInputs, toCalendarDateStr } from "@/lib/fechas/calendario";
-import { getFacturas } from "@/lib/gestion-clientes/storage";
-import { getClientes } from "@/lib/clientes/storage";
-import { etiquetaVisibleTipoServicio } from "@/lib/clientes/tipo-servicio-catalogo";
-import { useMapNombreTipoServicioCatalogo } from "@/lib/clientes/use-map-nombre-tipo-servicio";
+import Link from "next/link";
+import { Banknote, Loader2 } from "lucide-react";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
-import { RegistrarPagoModal } from "@/components/pagos/RegistrarPagoModal";
-import type { Cliente } from "@/lib/clientes/types";
-import type { Factura } from "@/lib/gestion-clientes/types";
+import { generarYAbrirRecibo } from "@/lib/recibos/client";
+import { RegistrarCobroModalCxc } from "@/components/cobros/RegistrarCobroModalCxc";
 
-const inputClass =
-  "w-full border border-slate-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-[#0EA5E9] focus:outline-none bg-white text-sm";
-const labelClass = "block text-xs font-medium text-slate-500 mb-1";
-
-type TabPagos = "pendientes" | "cobrados";
-
-function formatFecha(str: string) {
-  if (!str) return "—";
-  const [y, m, d] = str.split("-");
-  return `${d}/${m}/${y}`;
-}
-
-interface PagoCobrado {
+type Cuenta = {
   id: string;
-  factura_numero: string;
+  cliente_id: string;
   cliente_nombre: string;
-  /** Nombre visible desde `cliente_tipos_servicio_catalogo` (resuelto en GET /api/pagos). */
-  cliente_tipo_nombre: string;
-  /** Slug normalizado (`clientes.tipo_servicio_cliente`); `null` = sin tipo. */
-  cliente_tipo_slug: string | null;
+  venta_id: string;
+  numero_venta: string | null;
+  fecha_emision: string | null;
+  fecha_vencimiento: string | null;
+  moneda: string;
+  total: number;
+  saldo: number;
+  estado: string;
+  vencida: boolean;
+};
+type Cobro = {
+  id: string;
+  cliente_id: string | null;
+  cliente_nombre: string;
+  numero_venta: string | null;
+  fecha_pago: string | null;
   monto: number;
-  fecha_pago: string;
   metodo_pago: string;
-  usuario_email: string;
-  referencia?: string;
+  referencia: string | null;
+  usuario_nombre: string | null;
+};
+
+const ESTADO_BADGE: Record<string, string> = {
+  pendiente: "bg-amber-100 text-amber-700",
+  parcial: "bg-sky-100 text-sky-700",
+  pagado: "bg-emerald-100 text-emerald-700",
+  vencido: "bg-red-100 text-red-700",
+  anulado: "bg-slate-100 text-slate-500",
+};
+const METODO_LABEL: Record<string, string> = {
+  efectivo: "Efectivo", transferencia: "Transferencia", tarjeta: "Tarjeta", otro: "Otro",
+};
+
+function fmtGs(n: number, moneda = "PYG") {
+  return (moneda === "USD" ? "USD " : "Gs. ") + Math.round(Number(n) || 0).toLocaleString("es-PY");
 }
+function ymd(iso: string | null): string {
+  if (!iso) return "";
+  return String(iso).slice(0, 10);
+}
+function fmtFecha(iso: string | null) {
+  const s = ymd(iso);
+  if (!s) return "—";
+  const [y, m, d] = s.split("-");
+  return d && m && y ? `${d}/${m}/${y}` : s;
+}
+
+const inputClass = "rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#4FAEB2]/40";
 
 export default function PagosPage() {
-  const [tab, setTab] = useState<TabPagos>("pendientes");
-  const [facturas, setFacturas] = useState<Factura[]>([]);
-  const [clientes, setClientes] = useState<Cliente[]>([]);
-  const [cobrados, setCobrados] = useState<PagoCobrado[]>([]);
-  const [cargandoCobrados, setCargandoCobrados] = useState(false);
-  const [modalPago, setModalPago] = useState(false);
-  const [facturaSeleccionada, setFacturaSeleccionada] = useState<Factura | null>(null);
-  const [filtroDesde, setFiltroDesde] = useState("");
-  const [filtroHasta, setFiltroHasta] = useState("");
-  /** "" = todos, "__sin__" = sin clasificar, sino slug en minúsculas. */
-  const [filtroTipoCliente, setFiltroTipoCliente] = useState("");
+  const [cuentas, setCuentas] = useState<Cuenta[]>([]);
+  const [cobros, setCobros] = useState<Cobro[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<"pendientes" | "cobrados">("pendientes");
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const [toast, setToast] = useState<string | null>(null);
 
-  const rangoFechas = useMemo(
-    () => rangoDesdeHastaInputs(filtroDesde, filtroHasta),
-    [filtroDesde, filtroHasta]
-  );
+  const [cobrando, setCobrando] = useState<Cuenta | null>(null);
+  const [reciboBusy, setReciboBusy] = useState<string | null>(null);
 
-  const fechaEnRangoCalendario = useCallback(
-    (fechaRaw: string): boolean => {
-      if (!rangoFechas) return true;
-      const cal = toCalendarDateStr(fechaRaw);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(cal)) return false;
-      return enRangoCalendario(cal, rangoFechas.desde, rangoFechas.hasta);
-    },
-    [rangoFechas]
-  );
-
-  useEffect(() => {
-    getFacturas().then(setFacturas);
-    getClientes().then(setClientes);
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchWithSupabaseSession("/api/cobros/cuentas", { cache: "no-store" });
+      const body = await res.json();
+      if (!res.ok || body?.success === false) {
+        setError(body?.error ?? "No se pudieron cargar las cobranzas.");
+        return;
+      }
+      setCuentas((body.data?.cuentas ?? []) as Cuenta[]);
+      setCobros((body.data?.cobros ?? []) as Cobro[]);
+    } catch {
+      setError("Error de red.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const mapNombreTipoServicio = useMapNombreTipoServicioCatalogo(clientes);
+  useEffect(() => {
+    void cargar();
+  }, [cargar]);
 
-  async function fetchCobrados() {
-    setCargandoCobrados(true);
-    try {
-      const res = await fetchWithSupabaseSession("/api/pagos");
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data)) {
-        setCobrados(
-          json.data.map((p: Record<string, unknown>) => ({
-            id: p.id as string,
-            factura_numero: (p.factura_numero as string) ?? "—",
-            cliente_nombre: (p.cliente_nombre as string) ?? "—",
-            cliente_tipo_nombre: String(p.cliente_tipo_nombre ?? "—").trim() || "—",
-            cliente_tipo_slug:
-              p.cliente_tipo_slug === null || p.cliente_tipo_slug === undefined
-                ? null
-                : String(p.cliente_tipo_slug).trim() || null,
-            monto: Number(p.monto) || 0,
-            fecha_pago: toCalendarDateStr((p.fecha_pago as string) ?? "") || String(p.fecha_pago ?? "").slice(0, 10),
-            metodo_pago: (p.metodo_pago as string) ?? "efectivo",
-            usuario_email: (p.usuario_email as string) ?? "—",
-            referencia: (p.referencia as string) || undefined,
-          }))
-        );
-      } else {
-        setCobrados([]);
-      }
-    } catch {
-      setCobrados([]);
-    } finally {
-      setCargandoCobrados(false);
-    }
+  const enRango = useCallback(
+    (fecha: string | null) => {
+      const f = ymd(fecha);
+      if (!f) return !desde && !hasta;
+      if (desde && f < desde) return false;
+      if (hasta && f > hasta) return false;
+      return true;
+    },
+    [desde, hasta]
+  );
+
+  // Pendientes = cuentas con saldo > 0 (incluye parciales). Filtro por emisión o vencimiento.
+  const pendientes = useMemo(
+    () =>
+      cuentas
+        .filter((c) => c.saldo > 0 && c.estado !== "anulado")
+        .filter((c) => (!desde && !hasta) ? true : (enRango(c.fecha_emision) || enRango(c.fecha_vencimiento))),
+    [cuentas, desde, hasta, enRango]
+  );
+  // Cobrados = historial de pagos. Filtro por fecha de pago.
+  const cobradosVista = useMemo(
+    () => cobros.filter((c) => (!desde && !hasta) ? true : enRango(c.fecha_pago)),
+    [cobros, desde, hasta, enRango]
+  );
+
+  const sumPend = useMemo(
+    () => pendientes.reduce((a, c) => ({ total: a.total + c.total, saldo: a.saldo + c.saldo }), { total: 0, saldo: 0 }),
+    [pendientes]
+  );
+  const sumCob = useMemo(() => cobradosVista.reduce((a, c) => a + c.monto, 0), [cobradosVista]);
+
+  function abrirCobro(c: Cuenta) {
+    setCobrando(c);
   }
 
-  useEffect(() => {
-    if (tab === "cobrados") fetchCobrados();
-  }, [tab]);
-
-  const pendientesBase = useMemo(
-    () =>
-      facturas.filter((f) => {
-        if (f.saldo <= 0 || f.estado === "Anulado" || f.estado === "Corregida NC") return false;
-        const cli = clientes.find((c) => c.id === f.cliente_id);
-        if (cli?.estado === "inactivo") return false;
-        return true;
-      }),
-    [facturas, clientes]
-  );
-
-  const pendientesPorFecha = useMemo(() => {
-    if (!rangoFechas) return pendientesBase;
-    return pendientesBase.filter(
-      (f) =>
-        fechaEnRangoCalendario(f.fecha) ||
-        fechaEnRangoCalendario(f.fecha_vencimiento)
-    );
-  }, [pendientesBase, rangoFechas, fechaEnRangoCalendario]);
-
-  const pendientesVista = useMemo(() => {
-    if (filtroTipoCliente === "") return pendientesPorFecha;
-    if (filtroTipoCliente === "__sin__") {
-      return pendientesPorFecha.filter((f) => {
-        const c = clientes.find((x) => String(x.id) === String(f.cliente_id));
-        return !c || !(c.tipo_servicio_cliente ?? "").trim();
-      });
-    }
-    const slug = filtroTipoCliente.toLowerCase();
-    return pendientesPorFecha.filter((f) => {
-      const c = clientes.find((x) => String(x.id) === String(f.cliente_id));
-      return (c?.tipo_servicio_cliente ?? "").trim().toLowerCase() === slug;
-    });
-  }, [pendientesPorFecha, filtroTipoCliente, clientes]);
-
-  const cobradosPorFecha = useMemo(() => {
-    if (!rangoFechas) return cobrados;
-    return cobrados.filter((p) => fechaEnRangoCalendario(p.fecha_pago));
-  }, [cobrados, rangoFechas, fechaEnRangoCalendario]);
-
-  const cobradosVista = useMemo(() => {
-    if (filtroTipoCliente === "") return cobradosPorFecha;
-    if (filtroTipoCliente === "__sin__")
-      return cobradosPorFecha.filter((p) => p.cliente_tipo_slug == null);
-    const slug = filtroTipoCliente.toLowerCase();
-    return cobradosPorFecha.filter((p) => p.cliente_tipo_slug === slug);
-  }, [cobradosPorFecha, filtroTipoCliente]);
-
-  const opcionesTipoFiltro = useMemo(() => {
-    const s = new Set<string>();
-    for (const c of clientes) {
-      const t = (c.tipo_servicio_cliente ?? "").trim().toLowerCase();
-      if (t) s.add(t);
-    }
-    for (const k of Object.keys(mapNombreTipoServicio)) s.add(k);
-    return [...s]
-      .sort()
-      .map((slug) => ({
-        value: slug,
-        label: etiquetaVisibleTipoServicio(slug, mapNombreTipoServicio),
-      }));
-  }, [clientes, mapNombreTipoServicio]);
-
-  /** Sumas de importe total y de saldo en la vista (fechas + tipo de cliente). */
-  const totalesPendientesVista = useMemo(
-    () =>
-      pendientesVista.reduce(
-        (acc, f) => ({
-          monto: acc.monto + (Number.isFinite(f.monto) ? f.monto : 0),
-          saldo: acc.saldo + (Number.isFinite(f.saldo) ? f.saldo : 0),
-        }),
-        { monto: 0, saldo: 0 }
-      ),
-    [pendientesVista]
-  );
-
-  const totalCobradoVista = useMemo(
-    () => cobradosVista.reduce((acc, p) => acc + (Number.isFinite(p.monto) ? p.monto : 0), 0),
-    [cobradosVista]
-  );
-
-  const clienteMapNombre = useMemo(
-    () => Object.fromEntries(clientes.map((c) => [c.id, (c.empresa ?? c.nombre_contacto) || "—"])),
-    [clientes]
-  );
-  const labelTipoClienteFila = useCallback(
-    (clienteId: string) => {
-      const c = clientes.find((x) => String(x.id) === String(clienteId));
-      if (!c) return "—";
-      const t = (c.tipo_servicio_cliente ?? "").trim();
-      if (!t) return "Sin clasificar";
-      return etiquetaVisibleTipoServicio(t, mapNombreTipoServicio);
-    },
-    [clientes, mapNombreTipoServicio]
-  );
-
-  const METODO_LABELS: Record<string, string> = {
-    efectivo: "Efectivo",
-    transferencia: "Transferencia",
-    cheque: "Cheque",
-    tarjeta: "Tarjeta",
-    otro: "Otro",
-  };
+  const hayFiltro = !!desde || !!hasta;
 
   return (
     <div className="w-full min-w-0 max-w-full space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-800">Pagos</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Registrar pagos de facturas pendientes de cobro</p>
-      </div>
-
-      <div className="flex gap-3 border-b border-slate-200">
-        <button
-          type="button"
-          onClick={() => setTab("pendientes")}
-          className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
-            tab === "pendientes" ? "bg-white border border-slate-200 border-b-white -mb-px text-[#0EA5E9]" : "text-slate-600 hover:text-slate-800"
-          }`}
-        >
-          Pendientes
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("cobrados")}
-          className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
-            tab === "cobrados" ? "bg-white border border-slate-200 border-b-white -mb-px text-[#0EA5E9]" : "text-slate-600 hover:text-slate-800"
-          }`}
-        >
-          Cobrados
-        </button>
-      </div>
-
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm">
-        <p className="w-full text-xs text-slate-500 sm:mr-2 sm:max-w-[min(100%,20rem)]">
-          Fechas (mismo criterio que el dashboard) y, opcionalmente, tipo de cliente. Los totales inferiores
-          se recalculan con lo visible.
-        </p>
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className={labelClass}>Desde</label>
-            <input
-              type="date"
-              value={filtroDesde}
-              onChange={(e) => setFiltroDesde(e.target.value)}
-              className={`${inputClass} w-[11rem]`}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Hasta</label>
-            <input
-              type="date"
-              value={filtroHasta}
-              onChange={(e) => setFiltroHasta(e.target.value)}
-              className={`${inputClass} w-[11rem]`}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Tipo de cliente</label>
-            <select
-              value={filtroTipoCliente}
-              onChange={(e) => setFiltroTipoCliente(e.target.value)}
-              className={`${inputClass} min-w-[10.5rem] max-w-full sm:w-[14rem]`}
-            >
-              <option value="">Todos los tipos</option>
-              <option value="__sin__">Sin clasificar</option>
-              {opcionesTipoFiltro.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setFiltroDesde("");
-              setFiltroHasta("");
-              setFiltroTipoCliente("");
-            }}
-            className="border border-slate-300 bg-white px-3 py-2 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Limpiar filtros
-          </button>
-        </div>
-      </div>
-
-      {tab === "pendientes" && (
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">Facturas pendientes de cobro</h2>
-          <span className="text-xs text-slate-500">
-            {rangoFechas
-              ? `${pendientesVista.length} según filtros · ${pendientesBase.length} con saldo en total`
-              : `${pendientesVista.length} facturas con saldo (filtros)`}
-          </span>
-        </div>
-        {pendientesBase.length === 0 ? (
-          <div className="p-12 text-center text-slate-500">
-            <p className="text-sm">No hay facturas pendientes de cobro.</p>
-            <Link href="/clientes" className="text-[#0EA5E9] hover:underline text-sm mt-2 inline-block">
-              Ir a Clientes →
-            </Link>
-          </div>
-        ) : rangoFechas && pendientesPorFecha.length === 0 ? (
-          <div className="p-12 text-center text-slate-500">
-            <p className="text-sm">Ninguna factura con emisión o vencimiento en el rango de fechas.</p>
-            <button
-              type="button"
-              onClick={() => {
-                setFiltroDesde("");
-                setFiltroHasta("");
-                setFiltroTipoCliente("");
-              }}
-              className="text-[#0EA5E9] hover:underline text-xs mt-2"
-            >
-              Limpiar filtros
-            </button>
-          </div>
-        ) : pendientesVista.length === 0 ? (
-          <div className="p-12 text-center text-slate-500">
-            <p className="text-sm">Ninguna factura con el tipo de cliente seleccionado.</p>
-            <button
-              type="button"
-              onClick={() => setFiltroTipoCliente("")}
-              className="text-[#0EA5E9] hover:underline text-xs mt-2"
-            >
-              Ver todos los tipos
-            </button>
-          </div>
-        ) : (
-          <div className="overflow-x-auto overscroll-x-contain -mx-px sm:mx-0">
-            <table className="w-full min-w-[920px] table-auto border-separate border-spacing-0 text-sm sm:min-w-0 sm:w-full">
-              <thead className="bg-slate-50">
-                <tr>
-                  {["Número", "Cliente", "Tipo de cliente", "Fecha", "Vencimiento", "Total", "Saldo", "Estado", "Acción"].map((h) => (
-                    <th
-                      key={h}
-                      className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 first:pl-4 last:pr-4 sm:px-4 sm:first:pl-5 sm:last:pr-5 lg:px-5"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {pendientesVista.map((f) => (
-                  <tr key={f.id} className="hover:bg-slate-50">
-                    <td className="whitespace-nowrap px-3 py-2.5 font-mono text-sm text-slate-800 first:pl-4 sm:px-4 sm:first:pl-5 lg:px-5">
-                      {f.numero_factura}
-                    </td>
-                    <td className="min-w-[9rem] px-3 py-2.5 sm:min-w-[12rem] sm:px-4 lg:min-w-[16rem] xl:min-w-[20rem]">
-                      <Link
-                        href={`/clientes/${f.cliente_id}`}
-                        className="block min-w-0 break-words [overflow-wrap:anywhere] text-sm font-medium text-[#0EA5E9] hover:underline"
-                        title={String(clienteMapNombre[String(f.cliente_id)] ?? `Cliente #${String(f.cliente_id).slice(0, 8)}`)}
-                      >
-                        {clienteMapNombre[String(f.cliente_id)] ?? `Cliente #${String(f.cliente_id).slice(0, 8)}`}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2.5 text-sm text-slate-700 sm:px-4">
-                      <span
-                        className="inline-block max-w-[20rem] text-slate-600 2xl:whitespace-nowrap 2xl:max-w-none"
-                        title={labelTipoClienteFila(String(f.cliente_id))}
-                      >
-                        {labelTipoClienteFila(String(f.cliente_id))}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-slate-600 sm:px-4">{formatFecha(f.fecha)}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-slate-600 sm:px-4">{formatFecha(f.fecha_vencimiento)}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right text-sm font-semibold tabular-nums text-slate-800 sm:px-4 sm:text-left">
-                      Gs. {f.monto.toLocaleString("es-PY")}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right text-sm font-semibold tabular-nums text-amber-600 sm:px-4 sm:text-left">
-                      Gs. {f.saldo.toLocaleString("es-PY")}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2.5 sm:px-4">
-                      <span className="inline-block text-xs font-medium whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-800">
-                        {f.estado}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2.5 last:pr-4 sm:px-4 sm:last:pr-5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFacturaSeleccionada(f);
-                          setModalPago(true);
-                        }}
-                        className="text-xs font-medium text-[#0EA5E9] hover:underline"
-                      >
-                        Registrar pago
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr
-                  className="border-t-2 border-slate-200 bg-slate-50/90"
-                  role="status"
-                  aria-label="Totales de la vista filtrada"
-                >
-                  <td
-                    colSpan={5}
-                    className="align-top px-3 py-3 text-left first:pl-4 sm:px-4 sm:first:pl-5"
-                  >
-                    <p className="text-xs font-semibold text-slate-700">
-                      {rangoFechas
-                        ? filtroTipoCliente
-                          ? "Suma con filtros activos (rango, tipo y clientes con saldo)"
-                          : "Suma en el rango de fechas (facturas con saldo)"
-                        : filtroTipoCliente
-                          ? "Suma con filtros activos (vista y tipo de cliente)"
-                          : "Suma de la vista (facturas con saldo listadas arriba)"}
-                    </p>
-                    <p className="mt-0.5 text-[11px] text-slate-500">
-                      {pendientesVista.length} registro{pendientesVista.length === 1 ? "" : "s"}. Se
-                      recalcula al cambiar fecha, tipo o tabla.
-                    </p>
-                  </td>
-                  <td className="whitespace-nowrap align-top px-3 py-3 text-right sm:px-4 sm:text-left">
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Total</span>
-                    <p className="text-sm font-bold tabular-nums text-slate-800">
-                      Gs. {totalesPendientesVista.monto.toLocaleString("es-PY")}
-                    </p>
-                  </td>
-                  <td className="whitespace-nowrap align-top px-3 py-3 text-right sm:px-4 sm:text-left">
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Saldo</span>
-                    <p className="text-sm font-bold tabular-nums text-amber-600">
-                      Gs. {totalesPendientesVista.saldo.toLocaleString("es-PY")}
-                    </p>
-                  </td>
-                  <td
-                    colSpan={2}
-                    className="align-top px-3 py-3 text-right last:pr-4 text-[11px] text-slate-500 sm:px-4 sm:last:pr-5"
-                  />
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        )}
-      </div>
+      {toast && (
+        <div className="fixed top-4 right-4 z-50 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg">✓ {toast}</div>
       )}
 
-      {tab === "cobrados" && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-700">Pagos registrados</h2>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                Solo filas de la tabla de pagos (mismo criterio que “Cobrado del período” en el dashboard financiero).
-              </p>
-            </div>
-            <span className="text-xs text-slate-500">
-              {cobrados.length > 0
-                ? `${cobradosVista.length} según filtros · ${cobrados.length} en total`
-                : "0 pagos"}
-            </span>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Banknote className="h-7 w-7 text-[#4FAEB2]" />
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#4FAEB2]">Cobranzas</p>
+            <h1 className="text-2xl font-bold text-gray-800">Pagos</h1>
+            <p className="text-sm text-gray-500">Cuentas por cobrar de ventas a crédito y registro de cobros.</p>
           </div>
-          {cargandoCobrados ? (
-            <div className="p-12 text-center text-slate-500 text-sm">Cargando…</div>
-          ) : cobrados.length === 0 ? (
-            <div className="p-12 text-center text-slate-500">
-              <p className="text-sm">No hay pagos registrados.</p>
-              <span className="text-xs mt-2 block">Los pagos aparecerán aquí cuando los registres.</span>
-            </div>
-          ) : rangoFechas && cobradosPorFecha.length === 0 ? (
-            <div className="p-12 text-center text-slate-500">
-              <p className="text-sm">Ningún pago en el rango de fechas seleccionado.</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setFiltroDesde("");
-                  setFiltroHasta("");
-                  setFiltroTipoCliente("");
-                }}
-                className="text-[#0EA5E9] hover:underline text-xs mt-2"
-              >
-                Limpiar filtros
-              </button>
-            </div>
-          ) : cobradosVista.length === 0 ? (
-            <div className="p-12 text-center text-slate-500">
-              <p className="text-sm">Ningún pago con el tipo de cliente seleccionado.</p>
-              <button
-                type="button"
-                onClick={() => setFiltroTipoCliente("")}
-                className="text-[#0EA5E9] hover:underline text-xs mt-2"
-              >
-                Ver todos los tipos
-              </button>
-            </div>
+        </div>
+        {/* Filtro de fechas */}
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Desde</label>
+            <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className={inputClass} />
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Hasta</label>
+            <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className={inputClass} />
+          </div>
+          {hayFiltro && (
+            <button type="button" onClick={() => { setDesde(""); setHasta(""); }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
+              Limpiar
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Resumen */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="text-xs uppercase tracking-wide text-gray-400">Cuentas con saldo</div>
+          <div className="mt-1 text-2xl font-bold text-slate-800">{pendientes.length}</div>
+          <div className="text-[11px] text-slate-400">de {cuentas.length} en total</div>
+        </div>
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+          <div className="text-xs uppercase tracking-wide text-amber-600">Saldo pendiente</div>
+          <div className="mt-1 text-2xl font-bold text-amber-700">{fmtGs(sumPend.saldo)}</div>
+          <div className="text-[11px] text-amber-500">Total: {fmtGs(sumPend.total)}</div>
+        </div>
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+          <div className="text-xs uppercase tracking-wide text-emerald-600">Cobrado (filtros)</div>
+          <div className="mt-1 text-2xl font-bold text-emerald-700">{fmtGs(sumCob)}</div>
+          <div className="text-[11px] text-emerald-500">{cobradosVista.length} pagos</div>
+        </div>
+      </div>
+
+      {/* Pestañas: solo 2 */}
+      <div className="flex gap-2">
+        <button onClick={() => setTab("pendientes")} className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${tab === "pendientes" ? "bg-[#4FAEB2] text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+          Pendientes <span className={`rounded-full px-2 py-0.5 text-xs ${tab === "pendientes" ? "bg-white/25" : "bg-slate-100"}`}>{pendientes.length}</span>
+        </button>
+        <button onClick={() => setTab("cobrados")} className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${tab === "cobrados" ? "bg-[#4FAEB2] text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+          Cobrados <span className={`rounded-full px-2 py-0.5 text-xs ${tab === "cobrados" ? "bg-white/25" : "bg-slate-100"}`}>{cobradosVista.length}</span>
+        </button>
+      </div>
+
+      {error && <div className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>}
+
+      {loading ? (
+        <div className="p-8 flex items-center gap-2 text-sm text-gray-500"><Loader2 className="h-4 w-4 animate-spin" /> Cargando…</div>
+      ) : tab === "pendientes" ? (
+        <div className="w-full rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          {pendientes.length === 0 ? (
+            <div className="p-10 text-center text-sm text-gray-500">No hay cuentas pendientes {hayFiltro ? "en el rango seleccionado" : ""}.</div>
           ) : (
-            <div className="overflow-x-auto overscroll-x-contain -mx-px sm:mx-0">
-              <table className="w-full min-w-[1000px] table-auto border-separate border-spacing-0 text-sm sm:min-w-0 sm:w-full">
-                <thead className="bg-slate-50">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase text-gray-500">
                   <tr>
-                    {["Factura", "Cliente", "Tipo de cliente", "Monto pagado", "Fecha", "Método", "Usuario", "Referencia"].map((h) => (
-                      <th
-                        key={h}
-                        className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 first:pl-4 last:pr-4 sm:px-4 sm:first:pl-5 sm:last:pr-5 lg:px-5"
-                      >
-                        {h}
-                      </th>
-                    ))}
+                    <th className="py-3 px-4 font-medium">Cliente</th>
+                    <th className="py-3 px-4 font-medium">Venta</th>
+                    <th className="py-3 px-4 font-medium">Emisión</th>
+                    <th className="py-3 px-4 font-medium">Vencimiento</th>
+                    <th className="py-3 px-4 font-medium text-right">Total</th>
+                    <th className="py-3 px-4 font-medium text-right">Cobrado</th>
+                    <th className="py-3 px-4 font-medium text-right">Saldo</th>
+                    <th className="py-3 px-4 font-medium">Estado</th>
+                    <th className="py-3 px-4 font-medium text-right">Acción</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {cobradosVista.map((p) => (
-                    <tr key={p.id} className="hover:bg-slate-50">
-                      <td className="whitespace-nowrap px-3 py-2.5 font-mono text-sm text-slate-800 first:pl-4 sm:px-4 sm:first:pl-5 lg:px-5">
-                        {p.factura_numero}
-                      </td>
-                      <td className="min-w-[9rem] px-3 py-2.5 sm:min-w-[12rem] sm:px-4 lg:min-w-[16rem] xl:min-w-[20rem]">
-                        <span
-                          className="block min-w-0 break-words [overflow-wrap:anywhere] text-sm font-medium text-slate-800"
-                          title={p.cliente_nombre}
-                        >
-                          {p.cliente_nombre}
+                  {pendientes.map((c) => (
+                    <tr key={c.id} className="hover:bg-slate-50">
+                      <td className="py-3 px-4 text-gray-700"><Link href={`/clientes/${c.cliente_id}/estado-cuenta`} className="hover:text-[#4FAEB2] hover:underline">{c.cliente_nombre}</Link></td>
+                      <td className="py-3 px-4 font-mono font-medium text-gray-800">{c.numero_venta ?? "—"}</td>
+                      <td className="py-3 px-4 text-gray-600">{fmtFecha(c.fecha_emision)}</td>
+                      <td className={`py-3 px-4 ${c.vencida ? "font-semibold text-red-600" : "text-gray-600"}`}>{fmtFecha(c.fecha_vencimiento)}</td>
+                      <td className="py-3 px-4 text-right tabular-nums">{fmtGs(c.total, c.moneda)}</td>
+                      <td className="py-3 px-4 text-right tabular-nums text-emerald-700">{fmtGs(c.total - c.saldo, c.moneda)}</td>
+                      <td className="py-3 px-4 text-right tabular-nums font-semibold text-amber-600">{fmtGs(c.saldo, c.moneda)}</td>
+                      <td className="py-3 px-4">
+                        <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${ESTADO_BADGE[c.vencida && c.estado !== "pagado" ? "vencido" : c.estado] ?? ESTADO_BADGE.pendiente}`}>
+                          {c.vencida && c.estado !== "pagado" ? "Vencido" : c.estado.charAt(0).toUpperCase() + c.estado.slice(1)}
                         </span>
                       </td>
-                      <td className="px-3 py-2.5 text-sm text-slate-700 sm:px-4">
-                        <span
-                          className="inline-block max-w-[20rem] text-slate-600 2xl:whitespace-nowrap 2xl:max-w-none"
-                          title={p.cliente_tipo_nombre}
-                        >
-                          {p.cliente_tipo_nombre}
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2.5 text-right text-sm font-semibold tabular-nums text-slate-800 sm:px-4 sm:text-left">
-                        Gs. {p.monto.toLocaleString("es-PY")}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2.5 text-slate-600 sm:px-4">
-                        {formatFecha(p.fecha_pago)}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2.5 text-slate-600 sm:px-4">
-                        {METODO_LABELS[p.metodo_pago] ?? p.metodo_pago}
-                      </td>
-                      <td className="px-3 py-2.5 text-sm text-slate-600 sm:px-4 [overflow-wrap:anywhere] break-words">
-                        {p.usuario_email}
-                      </td>
-                      <td className="min-w-[6rem] px-3 py-2.5 text-sm text-slate-500 sm:px-4 [overflow-wrap:anywhere] break-words last:pr-4 sm:last:pr-5">
-                        {p.referencia || "—"}
+                      <td className="py-3 px-4 text-right">
+                        <button onClick={() => abrirCobro(c)} className="rounded-lg bg-[#4FAEB2] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#3F8E91]">Registrar pago</button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr>
-                    <td colSpan={8} className="p-0">
-                      <div
-                        className="flex w-full min-w-0 flex-col items-stretch gap-2 border-t-2 border-slate-200 bg-slate-50/90 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
-                        role="status"
-                      >
-                        <p className="shrink-0 text-xs font-semibold text-slate-700 sm:max-w-[40%] sm:pr-2">
-                          {rangoFechas
-                            ? filtroTipoCliente
-                              ? "Total cobrado (filtros activos)"
-                              : "Total cobrado en el rango"
-                            : filtroTipoCliente
-                              ? "Total cobrado (filtros activos)"
-                              : "Total cobrado en esta vista"}
-                        </p>
-                        <p
-                          className="min-w-0 flex-1 whitespace-nowrap text-center text-sm font-bold tabular-nums text-[#0EA5E9] sm:px-2"
-                          style={{ lineHeight: 1.25 }}
-                        >
-                          {`Gs. ${totalCobradoVista.toLocaleString("es-PY")}`}
-                        </p>
-                        <p className="shrink-0 text-left text-[11px] text-slate-500 sm:max-w-[32%] sm:text-right">
-                          {cobradosVista.length} registro{cobradosVista.length === 1 ? "" : "s"} · se
-                          recalcula al cambiar el filtro
-                        </p>
-                      </div>
+                  <tr className="border-t-2 border-slate-200 bg-slate-50/90">
+                    <td colSpan={4} className="px-4 py-3">
+                      <p className="text-xs font-semibold text-slate-700">Suma de la vista</p>
+                      <p className="text-[11px] text-slate-500">{pendientes.length} registro{pendientes.length === 1 ? "" : "s"} · recalcula al cambiar fechas o pestaña</p>
                     </td>
+                    <td className="px-4 py-3 text-right">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Total</span>
+                      <p className="text-sm font-bold tabular-nums text-slate-800">{fmtGs(sumPend.total)}</p>
+                    </td>
+                    <td className="px-4 py-3" />
+                    <td className="px-4 py-3 text-right">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Saldo</span>
+                      <p className="text-sm font-bold tabular-nums text-amber-600">{fmtGs(sumPend.saldo)}</p>
+                    </td>
+                    <td colSpan={2} className="px-4 py-3" />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="w-full rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          {cobradosVista.length === 0 ? (
+            <div className="p-10 text-center text-sm text-gray-500">No hay cobros {hayFiltro ? "en el rango seleccionado" : "registrados"}.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase text-gray-500">
+                  <tr>
+                    <th className="py-3 px-4 font-medium">Fecha</th>
+                    <th className="py-3 px-4 font-medium">Cliente</th>
+                    <th className="py-3 px-4 font-medium">Venta</th>
+                    <th className="py-3 px-4 font-medium">Método</th>
+                    <th className="py-3 px-4 font-medium">Referencia</th>
+                    <th className="py-3 px-4 font-medium">Registrado por</th>
+                    <th className="py-3 px-4 font-medium text-right">Monto</th>
+                    <th className="py-3 px-4 font-medium text-right">Recibo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {cobradosVista.map((c) => (
+                    <tr key={c.id} className="hover:bg-slate-50">
+                      <td className="py-2.5 px-4 text-gray-600">{fmtFecha(c.fecha_pago)}</td>
+                      <td className="py-2.5 px-4 text-gray-700">
+                        {c.cliente_id ? <Link href={`/clientes/${c.cliente_id}/estado-cuenta`} className="hover:text-[#4FAEB2] hover:underline">{c.cliente_nombre}</Link> : c.cliente_nombre}
+                      </td>
+                      <td className="py-2.5 px-4 font-mono text-gray-700">{c.numero_venta ?? "—"}</td>
+                      <td className="py-2.5 px-4 text-gray-600">{METODO_LABEL[c.metodo_pago] ?? c.metodo_pago}</td>
+                      <td className="py-2.5 px-4 text-gray-500">{c.referencia ?? "—"}</td>
+                      <td className="py-2.5 px-4 text-gray-600">{c.usuario_nombre ?? "—"}</td>
+                      <td className="py-2.5 px-4 text-right tabular-nums font-semibold text-emerald-700">{fmtGs(c.monto)}</td>
+                      <td className="py-2.5 px-4 text-right">
+                        <button
+                          disabled={reciboBusy === c.id}
+                          onClick={async () => {
+                            if (reciboBusy) return;
+                            setReciboBusy(c.id);
+                            try {
+                              const r = await generarYAbrirRecibo({ origen: "cobro_cxc", cobro_cliente_id: c.id });
+                              if (r.ok) { setToast("Recibo generado"); setTimeout(() => setToast(null), 2500); }
+                              else { setError(r.error ?? "No se pudo generar el recibo."); }
+                            } finally {
+                              setReciboBusy(null);
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {reciboBusy === c.id ? <><Loader2 className="h-3 w-3 animate-spin" /> Abriendo…</> : "Recibo"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-slate-200 bg-slate-50/90">
+                    <td colSpan={5} className="px-4 py-3">
+                      <p className="text-xs font-semibold text-slate-700">Total cobrado en la vista</p>
+                      <p className="text-[11px] text-slate-500">{cobradosVista.length} registro{cobradosVista.length === 1 ? "" : "s"} · recalcula al cambiar fechas</p>
+                    </td>
+                    <td className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500">Cobrado</td>
+                    <td className="px-4 py-3 text-right"><p className="text-sm font-bold tabular-nums text-emerald-700">{fmtGs(sumCob)}</p></td>
+                    <td className="px-4 py-3" />
                   </tr>
                 </tfoot>
               </table>
@@ -593,26 +332,12 @@ export default function PagosPage() {
         </div>
       )}
 
-      <RegistrarPagoModal
-        open={modalPago && !!facturaSeleccionada}
-        factura={
-          facturaSeleccionada
-            ? {
-                id: facturaSeleccionada.id,
-                numero_factura: facturaSeleccionada.numero_factura,
-                saldo: facturaSeleccionada.saldo,
-                moneda: facturaSeleccionada.moneda,
-              }
-            : null
-        }
-        onClose={() => {
-          setModalPago(false);
-          setFacturaSeleccionada(null);
-        }}
-        onExito={async () => {
-          getFacturas().then(setFacturas);
-          if (tab === "cobrados") fetchCobrados();
-        }}
+      {/* Modal registrar pago (componente compartido con campos de Transferencia/Tarjeta) */}
+      <RegistrarCobroModalCxc
+        open={!!cobrando}
+        cuenta={cobrando ? { id: cobrando.id, numero_venta: cobrando.numero_venta, saldo: cobrando.saldo, moneda: cobrando.moneda, cliente_nombre: cobrando.cliente_nombre } : null}
+        onClose={() => setCobrando(null)}
+        onExito={async () => { setToast("Pago registrado"); setTimeout(() => setToast(null), 2800); await cargar(); }}
       />
     </div>
   );

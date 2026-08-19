@@ -44,14 +44,14 @@ export default function ProyectoDetalleModal({
       <button
         type="button"
         aria-label="Cerrar modal"
-        className="absolute inset-0 bg-black/75 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-slate-900/55 backdrop-blur-sm"
         onClick={requestClose}
       />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="proyecto-detalle-titulo"
-        className="relative flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl shadow-black/40"
+        className="relative flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/20"
       >
         <ProyectoDetalleInner
           projectId={projectId}

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
- * Instancia dedicada monocliente (ASUNHOME).
+ * Instancia dedicada monocliente (Ferretería República).
  * Schema único Postgres para catálogo + datos operativos.
  * Override opcional vía NEURA_CLIENT_SCHEMA si se reusa el repo para otro cliente.
  */

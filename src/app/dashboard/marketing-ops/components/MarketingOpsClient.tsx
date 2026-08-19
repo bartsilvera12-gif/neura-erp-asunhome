@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
+import { fetchWithSupabaseSession, isAbortError } from "@/lib/api/fetch-with-supabase-session";
 import type { MarketingOpsDashboard, MarketingOpsPieza } from "@/lib/marketing-ops/types";
 import {
   ESTADO_CLIENTE_OPTIONS,
@@ -104,43 +104,58 @@ export default function MarketingOpsClient() {
     return sp.toString();
   }, [filters]);
 
-  const load = useCallback(async () => {
+  // signal opcional: el useEffect le pasa uno para abortar si la pagina se desmonta;
+  // los handlers (saveDraft, boton de refresh) llaman load() sin signal porque
+  // arrancan con el componente seguro montado.
+  const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setErr(null);
-    const [rDash, rPiezas, rClientes, rUsers] = await Promise.all([
-      fetchWithSupabaseSession("/api/marketing-ops/dashboard", { cache: "no-store" }),
-      fetchWithSupabaseSession(`/api/marketing-ops/piezas${query ? `?${query}` : ""}`, { cache: "no-store" }),
-      fetchWithSupabaseSession("/api/clientes", { cache: "no-store" }),
-      fetchWithSupabaseSession("/api/usuarios/empresa-activos", { cache: "no-store" }),
-    ]);
+    try {
+      const [rDash, rPiezas, rClientes, rUsers] = await Promise.all([
+        fetchWithSupabaseSession("/api/marketing-ops/dashboard", { cache: "no-store", signal }),
+        fetchWithSupabaseSession(`/api/marketing-ops/piezas${query ? `?${query}` : ""}`, { cache: "no-store", signal }),
+        fetchWithSupabaseSession("/api/clientes", { cache: "no-store", signal }),
+        fetchWithSupabaseSession("/api/usuarios/empresa-activos", { cache: "no-store", signal }),
+      ]);
 
-    const [jDash, jPiezas, jClientes, jUsers] = await Promise.all([
-      rDash.json().catch(() => ({})),
-      rPiezas.json().catch(() => ({})),
-      rClientes.json().catch(() => ({})),
-      rUsers.json().catch(() => ({})),
-    ]);
+      if (signal?.aborted) return;
 
-    if (!rDash.ok || !jDash.success) {
-      setErr(typeof jDash.error === "string" ? jDash.error : "No se pudo cargar Marketing Ops");
+      const [jDash, jPiezas, jClientes, jUsers] = await Promise.all([
+        rDash.json().catch(() => ({})),
+        rPiezas.json().catch(() => ({})),
+        rClientes.json().catch(() => ({})),
+        rUsers.json().catch(() => ({})),
+      ]);
+
+      if (signal?.aborted) return;
+
+      if (!rDash.ok || !jDash.success) {
+        setErr(typeof jDash.error === "string" ? jDash.error : "No se pudo cargar Marketing Ops");
+        setLoading(false);
+        return;
+      }
+      if (!rPiezas.ok || !jPiezas.success) {
+        setErr(typeof jPiezas.error === "string" ? jPiezas.error : "No se pudieron cargar piezas");
+        setLoading(false);
+        return;
+      }
+
+      setDashboard(jDash.data as MarketingOpsDashboard);
+      setPiezas(Array.isArray(jPiezas.data) ? (jPiezas.data as MarketingOpsPieza[]) : []);
+      setClientes(Array.isArray(jClientes.data) ? (jClientes.data as ClienteOption[]) : []);
+      setUsuarios(Array.isArray(jUsers.usuarios) ? (jUsers.usuarios as UsuarioOption[]) : []);
       setLoading(false);
-      return;
-    }
-    if (!rPiezas.ok || !jPiezas.success) {
-      setErr(typeof jPiezas.error === "string" ? jPiezas.error : "No se pudieron cargar piezas");
+    } catch (e) {
+      if (isAbortError(e)) return;
+      setErr(e instanceof Error ? e.message : "Error al cargar Marketing Ops");
       setLoading(false);
-      return;
     }
-
-    setDashboard(jDash.data as MarketingOpsDashboard);
-    setPiezas(Array.isArray(jPiezas.data) ? (jPiezas.data as MarketingOpsPieza[]) : []);
-    setClientes(Array.isArray(jClientes.data) ? (jClientes.data as ClienteOption[]) : []);
-    setUsuarios(Array.isArray(jUsers.usuarios) ? (jUsers.usuarios as UsuarioOption[]) : []);
-    setLoading(false);
   }, [query]);
 
   useEffect(() => {
-    void load();
+    const ctrl = new AbortController();
+    void load(ctrl.signal);
+    return () => ctrl.abort();
   }, [load]);
 
   async function saveDraft() {
@@ -291,8 +306,11 @@ export default function MarketingOpsClient() {
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        {/* min-w-[1200px] activa scroll horizontal en mobile (10 columnas).
+            Antes min-w-full hacia que la tabla se encogiera y los botones
+            "Editar"/"Detalle" quedaran cortados. */}
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <table className="w-full min-w-[1200px] xl:min-w-0 divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">Título</th>

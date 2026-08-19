@@ -88,6 +88,10 @@ export interface ProductoRow {
   unidad_receta: string | null;
   factor_compra_receta: string | number;
   tiempo_prep_minutos: number;
+  precio_mayorista: string | number | null;
+  cantidad_minima_mayorista: string | number | null;
+  precio_distribuidor: string | number | null;
+  modo_receta: string;
 }
 
 export interface InsertProductoInput {
@@ -112,6 +116,9 @@ export interface InsertProductoInput {
   unidad_receta?: string | null;
   factor_compra_receta?: number;
   tiempo_prep_minutos?: number;
+  precio_mayorista?: number | null;
+  cantidad_minima_mayorista?: number | null;
+  precio_distribuidor?: number | null;
 }
 
 const RETURNING = `
@@ -120,7 +127,8 @@ const RETURNING = `
   codigo_barras, codigo_barras_interno, imagen_path, imagen_url,
   categoria_principal_id, ubicacion_principal_id, proveedor_principal_id,
   es_vendible, es_insumo,
-  controla_stock, valorizado, unidad_compra, unidad_receta, factor_compra_receta, tiempo_prep_minutos
+  controla_stock, valorizado, unidad_compra, unidad_receta, factor_compra_receta, tiempo_prep_minutos,
+  precio_mayorista, cantidad_minima_mayorista, precio_distribuidor, modo_receta
 `;
 
 // ─── Operaciones ──────────────────────────────────────────────────────────
@@ -138,14 +146,16 @@ export async function insertProducto(
       unidad_medida, metodo_valuacion, codigo_barras, codigo_barras_interno,
       categoria_principal_id, ubicacion_principal_id, proveedor_principal_id,
       es_vendible, es_insumo,
-      controla_stock, valorizado, unidad_compra, unidad_receta, factor_compra_receta, tiempo_prep_minutos
+      controla_stock, valorizado, unidad_compra, unidad_receta, factor_compra_receta, tiempo_prep_minutos,
+      precio_mayorista, cantidad_minima_mayorista, precio_distribuidor
     ) VALUES (
       $1::uuid, $2, $3, $4::numeric, $5::numeric, $6::numeric, $7::numeric,
       $8, $9, $10, COALESCE($11::boolean, false),
       $12::uuid, $13::uuid, $14::uuid,
       COALESCE($15::boolean, true), COALESCE($16::boolean, false),
       COALESCE($17::boolean, true), COALESCE($18::boolean, true),
-      $19, $20, COALESCE($21::numeric, 1), COALESCE($22::int, 0)
+      $19, $20, COALESCE($21::numeric, 1), COALESCE($22::int, 0),
+      $23::numeric, $24::numeric, $25::numeric
     )
     RETURNING ${RETURNING}
   `;
@@ -172,6 +182,9 @@ export async function insertProducto(
     d.unidad_receta ?? null,
     d.factor_compra_receta ?? null,
     d.tiempo_prep_minutos ?? null,
+    d.precio_mayorista ?? null,
+    d.cantidad_minima_mayorista ?? null,
+    d.precio_distribuidor ?? null,
   ];
   try {
     const { rows } = await pool().query<ProductoRow>(sql, params);
@@ -205,6 +218,10 @@ export interface UpdateProductoInput {
   unidad_receta?: string | null;
   factor_compra_receta?: number;
   tiempo_prep_minutos?: number;
+  precio_mayorista?: number | null;
+  cantidad_minima_mayorista?: number | null;
+  precio_distribuidor?: number | null;
+  modo_receta?: string;
 }
 
 /** Update parcial. Devuelve la fila o null si no existe / no pertenece a la empresa. */
@@ -255,6 +272,10 @@ export async function updateProductoPg(
   if (patch.unidad_receta !== undefined) add("unidad_receta", patch.unidad_receta || null);
   if (patch.factor_compra_receta !== undefined) add("factor_compra_receta", patch.factor_compra_receta, "::numeric");
   if (patch.tiempo_prep_minutos !== undefined) add("tiempo_prep_minutos", patch.tiempo_prep_minutos, "::int");
+  if (patch.precio_mayorista !== undefined) add("precio_mayorista", patch.precio_mayorista, "::numeric");
+  if (patch.cantidad_minima_mayorista !== undefined) add("cantidad_minima_mayorista", patch.cantidad_minima_mayorista, "::numeric");
+  if (patch.precio_distribuidor !== undefined) add("precio_distribuidor", patch.precio_distribuidor, "::numeric");
+  if (patch.modo_receta !== undefined) add("modo_receta", patch.modo_receta);
   if (sets.length === 0) return await getProductoPg(schemaRaw, empresaId, id);
 
   sets.push(`updated_at = now()`);
@@ -462,5 +483,6 @@ export function rowToProductoApi(r: ProductoRow): Record<string, unknown> {
     unidad_receta: r.unidad_receta ?? null,
     factor_compra_receta: Number(r.factor_compra_receta ?? 1),
     tiempo_prep_minutos: Number(r.tiempo_prep_minutos ?? 0),
+    modo_receta: r.modo_receta ?? "preparado_al_vender",
   };
 }

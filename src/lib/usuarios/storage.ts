@@ -1,78 +1,12 @@
 import type { EstadoUsuario, Usuario } from "./types";
 
 // ─── Datos de ejemplo ─────────────────────────────────────────────────────────
+// Vacío: los usuarios reales de Ferrecolor viven en ferrecolor.usuarios (DB).
+// Este mock legacy quedó desconectado del backend real; devolverlo vacío evita
+// que aparezcan "usuarios de demo" (JUAN PÉREZ, MARIA LOPEZ, etc.) en el
+// selector "Viendo como" del dashboard.
 
-const USUARIOS_MOCK: Usuario[] = [
-  {
-    id:                  1,
-    codigo_usuario:      "USR-0001",
-    nombre:              "ADMIN SISTEMA",
-    email:               "admin@neura.com",
-    telefono:            "0981-000001",
-    fecha_nacimiento:    "1985-03-15",
-    fecha_ingreso:       "2024-01-01",
-    tipo_contrato:       "salario",
-    salario_base:        5000000,
-    porcentaje_comision: undefined,
-    ips:                 true,
-    nivel:               "administrador",
-    area:                "administracion",
-    estado:              "activo",
-    created_at:          "2026-01-01T00:00:00.000Z",
-    updated_at:          "2026-01-01T00:00:00.000Z",
-  },
-  {
-    id:                  2,
-    codigo_usuario:      "USR-0002",
-    nombre:              "JUAN PÉREZ",
-    email:               "jperez@neura.com",
-    telefono:            "0991-112233",
-    fecha_nacimiento:    "1990-07-22",
-    fecha_ingreso:       "2024-03-01",
-    tipo_contrato:       "mixto",
-    salario_base:        2500000,
-    porcentaje_comision: 5,
-    ips:                 true,
-    nivel:               "usuario",
-    area:                "ventas",
-    estado:              "activo",
-    created_at:          "2026-01-15T08:00:00.000Z",
-    updated_at:          "2026-01-15T08:00:00.000Z",
-  },
-  {
-    id:                  3,
-    codigo_usuario:      "USR-0003",
-    nombre:              "MARIA LOPEZ",
-    email:               "mlopez@neura.com",
-    telefono:            "0981-445566",
-    fecha_nacimiento:    "1988-11-05",
-    fecha_ingreso:       "2024-06-15",
-    tipo_contrato:       "salario",
-    salario_base:        3500000,
-    ips:                 true,
-    nivel:               "supervisor",
-    area:                "finanzas",
-    estado:              "activo",
-    created_at:          "2026-02-01T08:00:00.000Z",
-    updated_at:          "2026-02-01T08:00:00.000Z",
-  },
-  {
-    id:                  4,
-    codigo_usuario:      "USR-0004",
-    nombre:              "CARLOS BENÍTEZ",
-    email:               "cbenitez@neura.com",
-    telefono:            "0981-778899",
-    fecha_ingreso:       "2025-01-10",
-    tipo_contrato:       "prestador_servicio",
-    salario_base:        1500000,
-    ips:                 false,
-    nivel:               "usuario",
-    area:                "soporte",
-    estado:              "inactivo",
-    created_at:          "2026-02-10T08:00:00.000Z",
-    updated_at:          "2026-03-01T08:00:00.000Z",
-  },
-];
+const USUARIOS_MOCK: Usuario[] = [];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
