@@ -83,7 +83,7 @@ function ZentraLogo() {
         className="text-xl font-bold text-white"
         style={{ letterSpacing: "0.55em", paddingLeft: "0.55em" }}
       >
-        ASUNHOME
+        ZENTRA
       </span>
     </div>
   );

@@ -1,8 +1,9 @@
 "use client";
 
+import Image from "next/image";
 
 /**
- * Pantalla de carga con la marca ASUNHOME centrada sobre
+ * Pantalla de carga premium con el logo oficial ZENTRA centrado sobre
  * fondo turquesa de marca. La palabra "Cargando" tiene una animación
  * "wave" letra por letra con shimmer overlay, sutil pero llamativa.
  */
@@ -40,11 +41,14 @@ export default function ZentraLoader({
         }}
       />
       <div className="relative z-10 h-32 w-[15rem] sm:h-40 sm:w-[18rem]">
-        <div className="flex h-full w-full items-center justify-center">
-          <span className="text-3xl font-extrabold tracking-[0.18em] text-white drop-shadow-[0_8px_30px_rgba(0,0,0,0.15)] sm:text-4xl">
-            ASUNHOME
-          </span>
-        </div>
+        <Image
+          src="/brand/zentra-logo-official.png"
+          alt="ZENTRA"
+          fill
+          sizes="(min-width: 640px) 18rem, 15rem"
+          className="object-contain object-center drop-shadow-[0_8px_30px_rgba(0,0,0,0.15)]"
+          priority
+        />
       </div>
       {/* "Cargando" con wave + shimmer */}
       <p
