@@ -218,7 +218,7 @@ function buildClienteColumns(mapNombreTipo: Record<string, string>): ClienteColu
     {
       key: "tipo_servicio",
       label: "Tipo servicio",
-      visibleDefault: true,
+      visibleDefault: !SIMPLE_CLIENTE,
       headerClassName: th,
       className: `${td} text-xs text-gray-600 whitespace-nowrap`,
       render: (c) => etiquetaVisibleTipoServicio(c.tipo_servicio_cliente ?? null, mapNombreTipo),
@@ -275,6 +275,10 @@ function buildClienteColumns(mapNombreTipo: Record<string, string>): ClienteColu
 }
 
 // ── Componente principal ──────────────────────────────────────────────────────
+
+/** Instancia sin CRM de servicios: oculta Tipo servicio, igual que en
+ *  clientes/[id] y clientes/nuevo. */
+const SIMPLE_CLIENTE = true;
 
 export default function ClientesPage() {
   const searchParams = useSearchParams();
@@ -464,21 +468,23 @@ export default function ClientesPage() {
             { value: "MANUAL", label: "Manual" },
           ]}
         />
-        <FancySelect
-          value={filtroTipoServicio}
-          onChange={(v) => setFiltroTipoServicio(v)}
-          ariaLabel="Filtrar por tipo de servicio"
-          className="w-44"
-          size="sm"
-          options={[
-            { value: "", label: "Tipo servicio" },
-            ...filasTipoCatalogo.map((t) => ({ value: t.slug, label: t.nombre })),
-            ...slugsExtraFiltro.map((slug) => ({
-              value: slug,
-              label: etiquetaVisibleTipoServicio(slug, mapNombreTipo),
-            })),
-          ]}
-        />
+        {!SIMPLE_CLIENTE && (
+          <FancySelect
+            value={filtroTipoServicio}
+            onChange={(v) => setFiltroTipoServicio(v)}
+            ariaLabel="Filtrar por tipo de servicio"
+            className="w-44"
+            size="sm"
+            options={[
+              { value: "", label: "Tipo servicio" },
+              ...filasTipoCatalogo.map((t) => ({ value: t.slug, label: t.nombre })),
+              ...slugsExtraFiltro.map((slug) => ({
+                value: slug,
+                label: etiquetaVisibleTipoServicio(slug, mapNombreTipo),
+              })),
+            ]}
+          />
+        )}
         {hayFiltros && (
           <button
             onClick={() => { setBusqueda(""); setFiltroEstado(""); setFiltroOrigen(""); setFiltroTipo(""); setFiltroTipoServicio(""); }}
