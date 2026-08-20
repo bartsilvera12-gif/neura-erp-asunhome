@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserAndEmpresa } from "@/lib/middleware/auth";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
+import { getEmisorDatos } from "@/lib/documentos/emisor";
 import { devolucionesEnabled } from "@/lib/devoluciones/feature-flag";
 import { getDevolucion } from "@/lib/devoluciones/server/devoluciones-pg";
 
@@ -72,6 +73,7 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
   if (!auth?.empresa_id) return new NextResponse("No autorizado", { status: 401 });
   const schema = await fetchDataSchemaForEmpresaId(auth.empresa_id);
   const d = await getDevolucion(schema, auth.empresa_id, id);
+  const emisor = await getEmisorDatos(schema, auth.empresa_id);
   if (!d) return new NextResponse("Devolución no encontrada", { status: 404 });
 
   // Filas con la misma logica del comprobante de venta (exenta/5%/10%)
@@ -169,8 +171,8 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
       <div class="brand">
         <img src="/brand/zentra-logo-official.png" alt="ASUNHOME" class="logo" />
         <div class="empresa-datos">
-          <div class="razon">GRUPO FERRE E.A.S.</div>
-          <div>R.U.C.: 80173997-7</div>
+          <div class="razon">${escapeHtml(emisor.razonSocial)}</div>
+          ${emisor.ruc ? `<div>R.U.C.: ${escapeHtml(emisor.ruc)}</div>` : ""}
         </div>
       </div>
       <div class="fecha-top">${escapeHtml(fechaLarga(String(d.created_at ?? "")))}</div>

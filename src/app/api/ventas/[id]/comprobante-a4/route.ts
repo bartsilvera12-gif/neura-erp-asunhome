@@ -136,6 +136,38 @@ export async function GET(
       referencia: string | null;
     }>;
 
+    // 2c) Emisor: razón social y RUC propios de la empresa.
+    // Antes estaban hardcodeados con los datos de otro cliente y salían
+    // impresos en cada comprobante.
+    let emisorRazon = "";
+    let emisorRuc = "";
+    try {
+      const { data: cfg } = await sb
+        .from("empresa_sifen_config")
+        .select("razon_social, ruc")
+        .eq("empresa_id", empresaId)
+        .maybeSingle();
+      const c = cfg as { razon_social?: string | null; ruc?: string | null } | null;
+      emisorRazon = (c?.razon_social ?? "").trim();
+      emisorRuc = (c?.ruc ?? "").trim();
+    } catch {
+      /* sin config SIFEN todavía */
+    }
+    if (!emisorRazon || !emisorRuc) {
+      try {
+        const { data: emp } = await sb
+          .from("empresas")
+          .select("nombre_empresa, ruc")
+          .eq("id", empresaId)
+          .maybeSingle();
+        const e = emp as { nombre_empresa?: string | null; ruc?: string | null } | null;
+        if (!emisorRazon) emisorRazon = (e?.nombre_empresa ?? "").trim();
+        if (!emisorRuc) emisorRuc = (e?.ruc ?? "").trim();
+      } catch {
+        /* se imprime sin encabezado de emisor */
+      }
+    }
+
     // 3) Cliente (opcional)
     let cliente: { nombre?: string; ruc?: string; direccion?: string; telefono?: string } | null = null;
     if ((venta as { cliente_id?: string | null }).cliente_id) {
@@ -230,7 +262,8 @@ export async function GET(
 <title>Comprobante ${escapeHtml(numeroControl)} — Ferrecolor</title>
 <style>
   * { box-sizing: border-box; }
-  @page { size: A4 portrait; margin: 8mm; }
+  /* El tamaño lo fija el selector de hoja (#hoja-css). Dejarlo aquí fijo
+     bloquea el desplegable de papel del diálogo de impresión de Chrome. */
   html, body { margin: 0; padding: 0; background: #f1f1f1; color: #111; font-family: 'Courier New', ui-monospace, monospace; font-size: 11.5px; }
   .hoja {
     background: #fff;
@@ -313,6 +346,18 @@ export async function GET(
     text-align: right; font-weight: 700; padding-top: 6px; font-size: 13px;
   }
 
+  .print-bar {
+    position: fixed; top: 12px; right: 12px; z-index: 20;
+    display: flex; align-items: center; gap: 8px;
+    background: #fff; border: 1px solid #d8e2e2; border-radius: 8px;
+    padding: 8px 10px; box-shadow: 0 2px 10px rgba(0,0,0,.08);
+    font-family: system-ui, sans-serif; font-size: 13px;
+  }
+  .print-bar label { color: #55706f; font-size: 12px; }
+  .print-bar select {
+    font: inherit; padding: 5px 8px; border: 1px solid #d8e2e2;
+    border-radius: 6px; background: #fff; color: #111;
+  }
   .print-btn {
     position: fixed; top: 12px; right: 12px; background: #4FAEB2; color: #fff;
     border: 0; padding: 8px 14px; border-radius: 8px; font-family: inherit; font-size: 13px;
@@ -322,7 +367,7 @@ export async function GET(
   @media print {
     html, body { background: #fff; font-size: 10.5px; }
     .hoja { box-shadow: none; margin: 0; width: auto; min-height: 0; padding: 4mm 6mm; }
-    .print-btn { display: none; }
+    .print-bar { display: none; }
     .header-top { margin-bottom: 6px; }
     .header-top .logo { max-height: 42px; }
     .fecha-top { font-size: 11px; }
@@ -340,14 +385,42 @@ export async function GET(
   }
 </style></head>
 <body>
-  <button class="print-btn" onclick="window.print()">Imprimir</button>
+  <style id="hoja-css">@page { size: A4 portrait; margin: 8mm; }</style>
+  <div class="print-bar">
+    <label for="hoja">Hoja</label>
+    <select id="hoja">
+      <option value="A4 portrait">A4 vertical</option>
+      <option value="A4 landscape">A4 horizontal</option>
+      <option value="Letter portrait">Carta vertical</option>
+      <option value="Letter landscape">Carta horizontal</option>
+      <option value="Legal portrait">Oficio vertical</option>
+      <option value="auto">Automático (elegir en el diálogo)</option>
+    </select>
+    <button class="print-btn" onclick="window.print()">Imprimir</button>
+  </div>
+  <script>
+    (function () {
+      var sel = document.getElementById("hoja");
+      var css = document.getElementById("hoja-css");
+      var KEY = "asunhome.hoja.comprobante";
+      try { var g = localStorage.getItem(KEY); if (g) sel.value = g; } catch (e) {}
+      function aplicar() {
+        css.textContent = sel.value === "auto"
+          ? "@page { margin: 8mm; }"
+          : "@page { size: " + sel.value + "; margin: 8mm; }";
+        try { localStorage.setItem(KEY, sel.value); } catch (e) {}
+      }
+      sel.addEventListener("change", aplicar);
+      aplicar();
+    })();
+  </script>
   <div class="hoja">
     <div class="header-top">
       <div class="brand">
         <img src="/brand/zentra-logo-official.png" alt="ASUNHOME" class="logo" />
         <div class="empresa-datos">
-          <div class="razon">GRUPO FERRE E.A.S.</div>
-          <div>R.U.C.: 80173997-7</div>
+          <div class="razon">${escapeHtml(emisorRazon)}</div>
+          ${emisorRuc ? `<div>R.U.C.: ${escapeHtml(emisorRuc)}</div>` : ""}
         </div>
       </div>
       <div class="fecha-top">${escapeHtml(fechaLarga(String(v.fecha ?? "")))}</div>
@@ -407,9 +480,8 @@ export async function GET(
       </div>
       ${
         pagos.length > 1
-          ? `<div class="linea">
-              <span class="lbl">FORMA DE PAGO:</span>
-              <span class="val">${pagos
+          ? `<div class="linea"><span class="lbl">FORMA DE PAGO:</span></div>
+             ${pagos
                 .map((p) => {
                   const mLabel = p.metodo_pago === "efectivo"
                     ? "Efectivo"
@@ -419,10 +491,13 @@ export async function GET(
                     ? "Tarjeta"
                     : escapeHtml(p.metodo_pago);
                   const ent = p.entidad_nombre_snapshot ? ` (${escapeHtml(p.entidad_nombre_snapshot)})` : "";
-                  return `${mLabel}${ent}: ${fmtGs(Number(p.monto) || 0)}`;
+                  const ref = p.referencia ? ` Ref. ${escapeHtml(p.referencia)}` : "";
+                  return `<div class="linea pago-detalle">
+                            <span class="lbl">&nbsp;&nbsp;&nbsp;&nbsp;${mLabel}${ent}${ref}</span>
+                            <span class="val">${fmtGs(Number(p.monto) || 0)}</span>
+                          </div>`;
                 })
-                .join("&nbsp;&nbsp;·&nbsp;&nbsp;")}</span>
-            </div>`
+                .join("")}`
           : ""
       }
       <div class="total-final">TOTAL: Gs. ${fmtGs(total)}</div>

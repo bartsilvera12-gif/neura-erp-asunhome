@@ -34,6 +34,15 @@ export default function EntidadesBancariasPage() {
 
   // Edición inline
   const [borrandoId, setBorrandoId] = useState<string | null>(null);
+  interface Dialogo {
+    tipo: "confirmar-borrado" | "ofrecer-desactivar" | "aviso";
+    entidad: EntidadBancaria | null;
+    titulo: string;
+    cuerpo: string;
+    confirmar: string | null;
+  }
+  const [dialogo, setDialogo] = useState<Dialogo | null>(null);
+
   const [editId, setEditId] = useState<string | null>(null);
   const [eCodigo, setECodigo] = useState("");
   const [eNombre, setENombre] = useState("");
@@ -68,11 +77,23 @@ export default function EntidadesBancariasPage() {
     setError(null);
   }
   /**
-   * Borra la entidad. El backend rechaza el borrado si ya tiene pagos
-   * asociados; en ese caso se ofrece desactivarla, que preserva el historial.
+   * Paso 1: pedir confirmación en un diálogo propio, centrado en la pantalla.
+   * Los window.confirm/alert nativos aparecen pegados arriba del navegador y
+   * tapan el formulario.
    */
-  async function handleDelete(en: EntidadBancaria) {
-    if (!window.confirm(`¿Borrar "${en.nombre}"? Esta acción no se puede deshacer.`)) return;
+  function pedirBorrado(en: EntidadBancaria) {
+    setDialogo({
+      tipo: "confirmar-borrado",
+      entidad: en,
+      titulo: "Borrar entidad",
+      cuerpo: `¿Borrar "${en.nombre}"? Esta acción no se puede deshacer.`,
+      confirmar: "Borrar",
+    });
+  }
+
+  /** Paso 2: borrar. Si el backend lo rechaza por uso, ofrecer desactivar. */
+  async function confirmarBorrado(en: EntidadBancaria) {
+    setDialogo(null);
     setBorrandoId(en.id);
     try {
       const res = await deleteEntidadBancaria(en.id);
@@ -80,16 +101,33 @@ export default function EntidadesBancariasPage() {
         await reload();
         return;
       }
-      const yaUsada = /pagos registrados/i.test(res.error ?? "");
-      if (yaUsada && window.confirm(`${res.error}\n\n¿Querés desactivarla ahora?`)) {
-        await updateEntidadBancaria(en.id, { activo: false });
-        await reload();
+      if (/pagos registrados/i.test(res.error ?? "")) {
+        setDialogo({
+          tipo: "ofrecer-desactivar",
+          entidad: en,
+          titulo: "No se puede borrar",
+          cuerpo: `${res.error} ¿Querés desactivarla ahora?`,
+          confirmar: "Desactivar",
+        });
         return;
       }
-      window.alert(res.error ?? "No se pudo borrar la entidad.");
+      setDialogo({
+        tipo: "aviso",
+        entidad: null,
+        titulo: "No se pudo borrar",
+        cuerpo: res.error ?? "No se pudo borrar la entidad.",
+        confirmar: null,
+      });
     } finally {
       setBorrandoId(null);
     }
+  }
+
+  async function confirmarDesactivar(en: EntidadBancaria) {
+    setDialogo(null);
+    const res = await updateEntidadBancaria(en.id, { activo: false });
+    if (!res.ok) setError(res.error);
+    else await reload();
   }
 
   async function saveEdit() {
@@ -175,7 +213,13 @@ export default function EntidadesBancariasPage() {
                 </td>
                 <td className="py-3 pr-4">
                   <button type="button" onClick={() => toggleActivo(en)}
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${en.activo ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                    title={en.activo ? "Desactivar entidad" : "Activar entidad"}
+                    className={`inline-flex min-w-[3.25rem] items-center justify-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold shadow-sm transition-colors ${
+                      en.activo
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                        : "border-slate-300 bg-slate-50 text-slate-500 hover:bg-slate-100"
+                    }`}>
+                    <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${en.activo ? "bg-emerald-500" : "bg-slate-400"}`} />
                     {en.activo ? "Sí" : "No"}
                   </button>
                 </td>
@@ -190,7 +234,7 @@ export default function EntidadesBancariasPage() {
                       <button type="button" onClick={() => startEdit(en)} className="text-sky-600 font-medium hover:underline">Editar</button>
                       <button
                         type="button"
-                        onClick={() => void handleDelete(en)}
+                        onClick={() => pedirBorrado(en)}
                         disabled={borrandoId === en.id}
                         className="font-medium text-rose-600 hover:underline disabled:opacity-50"
                       >
@@ -205,6 +249,51 @@ export default function EntidadesBancariasPage() {
         </table>
         {lista.length === 0 && <p className="py-8 text-center text-slate-400">Sin entidades cargadas.</p>}
       </div>
+
+      {dialogo && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dlg-titulo"
+          onClick={() => setDialogo(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="dlg-titulo" className="text-base font-semibold text-slate-900">{dialogo.titulo}</h3>
+            <p className="mt-2 text-sm text-slate-600">{dialogo.cuerpo}</p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDialogo(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              >
+                {dialogo.confirmar ? "Cancelar" : "Cerrar"}
+              </button>
+              {dialogo.confirmar && dialogo.entidad && (
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={() => {
+                    const en = dialogo.entidad!;
+                    if (dialogo.tipo === "confirmar-borrado") void confirmarBorrado(en);
+                    else void confirmarDesactivar(en);
+                  }}
+                  className={`rounded-lg px-4 py-2 text-sm font-medium text-white ${
+                    dialogo.tipo === "confirmar-borrado"
+                      ? "bg-rose-600 hover:bg-rose-700"
+                      : "bg-[#0EA5E9] hover:bg-[#0284C7]"
+                  }`}
+                >
+                  {dialogo.confirmar}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
