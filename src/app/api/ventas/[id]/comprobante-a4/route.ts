@@ -1,6 +1,6 @@
 /**
- * Comprobante A4 imprimible (formato "hoja tradicional" para Ferrecolor).
- * Reemplaza el ticket termico (el cliente no tiene ticketera).
+ * Comprobante A4 imprimible (formato "hoja tradicional").
+ * Reemplaza el ticket termico cuando el cliente no tiene ticketera.
  *
  * Layout:
  *   - Ciudad + fecha en letras al tope
@@ -12,6 +12,8 @@
  * GET /api/ventas/[id]/comprobante-a4
  */
 import { NextRequest, NextResponse } from "next/server";
+import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
+import { getEmisorDatos } from "@/lib/documentos/emisor";
 import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
 
 function escapeHtml(s: string): string {
@@ -136,37 +138,10 @@ export async function GET(
       referencia: string | null;
     }>;
 
-    // 2c) Emisor: razón social y RUC propios de la empresa.
-    // Antes estaban hardcodeados con los datos de otro cliente y salían
-    // impresos en cada comprobante.
-    let emisorRazon = "";
-    let emisorRuc = "";
-    try {
-      const { data: cfg } = await sb
-        .from("empresa_sifen_config")
-        .select("razon_social, ruc")
-        .eq("empresa_id", empresaId)
-        .maybeSingle();
-      const c = cfg as { razon_social?: string | null; ruc?: string | null } | null;
-      emisorRazon = (c?.razon_social ?? "").trim();
-      emisorRuc = (c?.ruc ?? "").trim();
-    } catch {
-      /* sin config SIFEN todavía */
-    }
-    if (!emisorRazon || !emisorRuc) {
-      try {
-        const { data: emp } = await sb
-          .from("empresas")
-          .select("nombre_empresa, ruc")
-          .eq("id", empresaId)
-          .maybeSingle();
-        const e = emp as { nombre_empresa?: string | null; ruc?: string | null } | null;
-        if (!emisorRazon) emisorRazon = (e?.nombre_empresa ?? "").trim();
-        if (!emisorRuc) emisorRuc = (e?.ruc ?? "").trim();
-      } catch {
-        /* se imprime sin encabezado de emisor */
-      }
-    }
+    // 2c) Emisor: razón social, RUC, dirección y teléfono propios de la empresa.
+    // Fuente única en lib/documentos/emisor — nunca hardcodeado.
+    const emisorSchema = await fetchDataSchemaForEmpresaId(empresaId);
+    const emisor = await getEmisorDatos(emisorSchema, empresaId);
 
     // 3) Cliente (opcional)
     let cliente: { nombre?: string; ruc?: string; direccion?: string; telefono?: string } | null = null;
@@ -412,6 +387,16 @@ export async function GET(
       }
       sel.addEventListener("change", aplicar);
       aplicar();
+
+      // Abrir directo en el diálogo de impresión: el comprobante se abre para
+      // imprimir, no para mirarlo. Si se cancela queda la hoja en pantalla con
+      // el selector, para cambiar el tamaño y reintentar.
+      // ?ver=1 en la URL lo desactiva.
+      if (new URLSearchParams(location.search).get("ver") !== "1") {
+        window.addEventListener("load", function () {
+          setTimeout(function () { window.print(); }, 250);
+        });
+      }
     })();
   </script>
   <div class="hoja">
@@ -419,8 +404,10 @@ export async function GET(
       <div class="brand">
         <img src="/brand/zentra-logo-official.png" alt="ASUNHOME" class="logo" />
         <div class="empresa-datos">
-          <div class="razon">${escapeHtml(emisorRazon)}</div>
-          ${emisorRuc ? `<div>R.U.C.: ${escapeHtml(emisorRuc)}</div>` : ""}
+          <div class="razon">${escapeHtml(emisor.razonSocial)}</div>
+          ${emisor.ruc ? `<div>R.U.C.: ${escapeHtml(emisor.ruc)}</div>` : ""}
+          ${emisor.direccion ? `<div>${escapeHtml(emisor.direccion)}</div>` : ""}
+          ${emisor.telefono ? `<div>Tel.: ${escapeHtml(emisor.telefono)}</div>` : ""}
         </div>
       </div>
       <div class="fecha-top">${escapeHtml(fechaLarga(String(v.fecha ?? "")))}</div>

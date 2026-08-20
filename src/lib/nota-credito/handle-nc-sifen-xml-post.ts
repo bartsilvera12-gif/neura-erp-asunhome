@@ -1,3 +1,5 @@
+import { getEmisorDatos } from "@/lib/documentos/emisor";
+import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { NextResponse } from "next/server";
 import type { UsuarioConEmpresaYRol } from "@/lib/middleware/auth";
 import type { AppSupabaseClient } from "@/lib/supabase/schema";
@@ -121,12 +123,16 @@ export async function handleNcSifenXmlPost(opts: {
 
   const fecha = loaded.payload.notaCredito.fecha_emision.trim();
   const yAnio = /^(\d{4})/.exec(fecha)?.[1] ?? String(new Date().getFullYear());
+  const emisorDatos = await getEmisorDatos(
+    await fetchDataSchemaForEmpresaId(auth.empresa_id),
+    auth.empresa_id
+  );
   const xmlOpts: BuildRdeXmlOptions = {
     timbradoFechaInicio: loaded.payload.emisor.timbrado_fecha_inicio_vigencia,
     timbradoFechaFin: `${yAnio}-12-31`,
     ambiente: loaded.ambiente,
-    emisorTelefono: "0993602828",
-    emisorEmail: "ferrecolorpinturas@gmail.com",
+    emisorTelefono: emisorDatos.telefono,
+    emisorEmail: emisorDatos.email,
     emisorDireccion: loaded.payload.emisor.direccion_fiscal.trim(),
     emisorNumCasa: 0,
     actividadEconomicaCodigo: loaded.payload.emisor.actividad_economica_codigo,
