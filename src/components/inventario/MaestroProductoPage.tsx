@@ -7,6 +7,7 @@
  * el proveedor habitual, que es lo que alimenta el reporte por proveedor.
  */
 import Link from "next/link";
+import ToggleActivo from "@/components/ui/ToggleActivo";
 import { useCallback, useEffect, useState } from "react";
 import {
   getMaestros,
@@ -251,13 +252,7 @@ export default function MaestroProductoPage(props: {
                   )}
                   <td className="py-3 pr-4 tabular-nums text-slate-600">{m.productos}</td>
                   <td className="py-3 pr-4">
-                    <button
-                      type="button"
-                      onClick={() => void toggleActivo(m)}
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${m.activo ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}
-                    >
-                      {m.activo ? "Sí" : "No"}
-                    </button>
+                    <ToggleActivo activo={m.activo} onToggle={() => void toggleActivo(m)} />
                   </td>
                   <td className="py-3">
                     {editId === m.id ? (

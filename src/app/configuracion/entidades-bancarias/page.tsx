@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import ToggleActivo from "@/components/ui/ToggleActivo";
 import { useEffect, useState } from "react";
 import {
   getEntidadesBancarias,
@@ -212,16 +213,7 @@ export default function EntidadesBancariasPage() {
                   ) : tipoLabel(en.tipo)}
                 </td>
                 <td className="py-3 pr-4">
-                  <button type="button" onClick={() => toggleActivo(en)}
-                    title={en.activo ? "Desactivar entidad" : "Activar entidad"}
-                    className={`inline-flex min-w-[3.25rem] items-center justify-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold shadow-sm transition-colors ${
-                      en.activo
-                        ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                        : "border-slate-300 bg-slate-50 text-slate-500 hover:bg-slate-100"
-                    }`}>
-                    <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${en.activo ? "bg-emerald-500" : "bg-slate-400"}`} />
-                    {en.activo ? "Sí" : "No"}
-                  </button>
+                  <ToggleActivo activo={en.activo} onToggle={() => toggleActivo(en)} />
                 </td>
                 <td className="py-3">
                   {editId === en.id ? (

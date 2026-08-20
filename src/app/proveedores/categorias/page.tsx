@@ -1,4 +1,5 @@
 "use client";
+import ToggleActivo from "@/components/ui/ToggleActivo";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -149,15 +150,7 @@ export default function ProveedorCategoriasPage() {
                   )}
                 </td>
                 <td className="py-3 pr-4">
-                  <button
-                    type="button"
-                    onClick={() => toggleActivo(c)}
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      c.activo ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
-                    }`}
-                  >
-                    {c.activo ? "Sí" : "No"}
-                  </button>
+                  <ToggleActivo activo={c.activo} onToggle={() => toggleActivo(c)} />
                 </td>
                 <td className="py-3">
                   {editingId === c.id ? (
