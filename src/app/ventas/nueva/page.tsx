@@ -129,6 +129,8 @@ export default function NuevaVentaPage() {
 
   // ── Estado global ──────────────────────────────────────────────────────────
   const [productos, setProductos]   = useState<Producto[]>([]);
+  /** Texto en crudo del input de cantidad mientras se edita (permite el vacio). */
+  const [cantidadDraft, setCantidadDraft] = useState<Record<number, string>>({});
   const [items, setItems]           = useState<LineaVenta[]>([]);
   const [errorLinea, setErrorLinea] = useState<string | null>(null);
   const [errorVenta, setErrorVenta] = useState<string | null>(null);
@@ -1376,8 +1378,31 @@ export default function NuevaVentaPage() {
                             <div className="mx-auto flex w-fit items-center rounded-md border border-slate-200 bg-white">
                               <button type="button" onClick={() => changeCantidadItem(idx, -1)} className="h-8 w-8 rounded-l-md text-slate-500 hover:bg-slate-100"><Minus className="mx-auto h-3.5 w-3.5" /></button>
                               <input
-                                type="number" min={1} value={item.cantidad}
-                                onChange={(e) => updateItemCampo(idx, { cantidad: Math.max(1, parseInt(e.target.value) || 1) })}
+                                type="text"
+                                inputMode="numeric"
+                                value={cantidadDraft[idx] ?? String(item.cantidad)}
+                                onChange={(e) => {
+                                  // Se permite el vacio mientras se tipea: si no, el input
+                                  // nunca se puede borrar y escribir "2" sobre "0" da "02".
+                                  const raw = e.target.value.replace(/[^0-9]/g, "");
+                                  setCantidadDraft((prev) => ({ ...prev, [idx]: raw }));
+                                  const n = parseInt(raw, 10);
+                                  if (Number.isFinite(n) && n >= 1) {
+                                    updateItemCampo(idx, { cantidad: n });
+                                  }
+                                }}
+                                onBlur={() => {
+                                  // Al salir se normaliza: vacio o 0 vuelve a 1.
+                                  setCantidadDraft((prev) => {
+                                    const next = { ...prev };
+                                    delete next[idx];
+                                    return next;
+                                  });
+                                  const n = parseInt(cantidadDraft[idx] ?? "", 10);
+                                  if (!Number.isFinite(n) || n < 1) {
+                                    updateItemCampo(idx, { cantidad: 1 });
+                                  }
+                                }}
                                 className="h-8 w-12 text-center text-sm tabular-nums outline-none"
                               />
                               <button type="button" onClick={() => changeCantidadItem(idx, 1)} className="h-8 w-8 rounded-r-md text-slate-500 hover:bg-slate-100"><Plus className="mx-auto h-3.5 w-3.5" /></button>

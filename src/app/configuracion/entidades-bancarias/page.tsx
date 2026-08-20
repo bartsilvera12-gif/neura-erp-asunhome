@@ -6,6 +6,7 @@ import {
   getEntidadesBancarias,
   createEntidadBancaria,
   updateEntidadBancaria,
+  deleteEntidadBancaria,
   type EntidadBancaria,
   type TipoEntidad,
 } from "@/lib/entidades/storage";
@@ -32,6 +33,7 @@ export default function EntidadesBancariasPage() {
   const [tipo, setTipo] = useState<TipoEntidad>("banco");
 
   // Edición inline
+  const [borrandoId, setBorrandoId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [eCodigo, setECodigo] = useState("");
   const [eNombre, setENombre] = useState("");
@@ -65,6 +67,31 @@ export default function EntidadesBancariasPage() {
     setETipo((en.tipo as TipoEntidad) ?? "otro");
     setError(null);
   }
+  /**
+   * Borra la entidad. El backend rechaza el borrado si ya tiene pagos
+   * asociados; en ese caso se ofrece desactivarla, que preserva el historial.
+   */
+  async function handleDelete(en: EntidadBancaria) {
+    if (!window.confirm(`¿Borrar "${en.nombre}"? Esta acción no se puede deshacer.`)) return;
+    setBorrandoId(en.id);
+    try {
+      const res = await deleteEntidadBancaria(en.id);
+      if (res.ok) {
+        await reload();
+        return;
+      }
+      const yaUsada = /pagos registrados/i.test(res.error ?? "");
+      if (yaUsada && window.confirm(`${res.error}\n\n¿Querés desactivarla ahora?`)) {
+        await updateEntidadBancaria(en.id, { activo: false });
+        await reload();
+        return;
+      }
+      window.alert(res.error ?? "No se pudo borrar la entidad.");
+    } finally {
+      setBorrandoId(null);
+    }
+  }
+
   async function saveEdit() {
     if (!editId) return;
     const res = await updateEntidadBancaria(editId, {
@@ -159,7 +186,17 @@ export default function EntidadesBancariasPage() {
                       <button type="button" onClick={() => setEditId(null)} className="text-slate-500 hover:underline">Cancelar</button>
                     </div>
                   ) : (
-                    <button type="button" onClick={() => startEdit(en)} className="text-sky-600 font-medium hover:underline">Editar</button>
+                    <div className="flex gap-3">
+                      <button type="button" onClick={() => startEdit(en)} className="text-sky-600 font-medium hover:underline">Editar</button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDelete(en)}
+                        disabled={borrandoId === en.id}
+                        className="font-medium text-rose-600 hover:underline disabled:opacity-50"
+                      >
+                        {borrandoId === en.id ? "Borrando…" : "Borrar"}
+                      </button>
+                    </div>
                   )}
                 </td>
               </tr>

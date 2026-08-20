@@ -121,7 +121,18 @@ function metodoPagoLabel(m: string | null | undefined): string {
   if (m === "tarjeta") return "Tarjeta";
   if (m === "transferencia") return "Transferencia";
   if (m === "efectivo") return "Efectivo";
+  if (m === "mixto") return "Mixto";
+  if (m === "cheque") return "Cheque";
+  if (m === "credito") return "Crédito";
   return "—";
+}
+
+/** Una fila por medio de pago cuando la venta fue mixta. */
+export interface PagoDetalleRow {
+  metodo_pago: string;
+  monto: number | string;
+  entidad_nombre_snapshot: string | null;
+  referencia: string | null;
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -164,6 +175,25 @@ interface PedidoBrief {
   observacion?: string | null;
 }
 
+/**
+ * Desglose por medio de pago. Solo se imprime si hay mas de una fila: con un
+ * solo medio, la linea "Pago" de arriba ya lo dice todo.
+ */
+function desglosePagosHtml(pagos: PagoDetalleRow[]): string {
+  if (!Array.isArray(pagos) || pagos.length < 2) return "";
+  return pagos
+    .map((p) => {
+      const monto = Number(p.monto ?? 0);
+      if (!Number.isFinite(monto) || monto <= 0) return "";
+      const entidad = p.entidad_nombre_snapshot?.trim();
+      const ref = p.referencia?.trim();
+      const extra = [entidad, ref].filter(Boolean).join(" · ");
+      const label = metodoPagoLabel(p.metodo_pago) + (extra ? ` (${escapeHtml(extra)})` : "");
+      return `<tr><td class="lbl">&nbsp;&nbsp;${label}</td><td class="val">${formatGs(monto)}</td></tr>`;
+    })
+    .join("");
+}
+
 // ── Render de cada copia ───────────────────────────────────────────────────
 
 function renderCopia(opts: {
@@ -174,8 +204,9 @@ function renderCopia(opts: {
   fontPx: number;
   isLast: boolean;
   negocio: string;
+  pagos: PagoDetalleRow[];
 }): string {
-  const { tipo, venta, items, brief, fontPx, isLast } = opts;
+  const { tipo, venta, items, brief, fontPx, isLast, pagos } = opts;
   const showPrices = tipo === "cliente";
   const sectorBadge = tipo === "pizzeria" ? "COMANDA PIZZERÍA" : tipo === "plancha" ? "COMANDA PLANCHA" : "";
   const modalidad = modalidadLabel(brief?.modalidad);
@@ -244,6 +275,7 @@ function renderCopia(opts: {
            ${ivaTotal > 0 ? `<tr><td class="lbl">IVA</td><td class="val">${formatGs(ivaTotal)}</td></tr>` : ""}
            <tr class="total-row"><td class="lbl">TOTAL</td><td class="val">${formatGs(total)}</td></tr>
            <tr><td class="lbl">Pago</td><td class="val">${metodoPagoLabel(venta.metodo_pago)}</td></tr>
+           ${desglosePagosHtml(pagos)}
          </tbody>
        </table>`
     : "";
@@ -410,6 +442,20 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
   if (!vQ.data) return new NextResponse("Venta no encontrada", { status: 404 });
   const venta = vQ.data as unknown as VentaRow;
 
+  // Desglose por medio de pago (para ventas con pago mixto).
+  // Si falla, el ticket sigue saliendo con la linea "Pago" simple.
+  let pagos: PagoDetalleRow[] = [];
+  try {
+    const pQ = await ctx.supabase
+      .from("ventas_pagos_detalle")
+      .select("metodo_pago, monto, entidad_nombre_snapshot, referencia")
+      .eq("venta_id", id)
+      .eq("empresa_id", empresaId);
+    pagos = (pQ.data ?? []) as unknown as PagoDetalleRow[];
+  } catch {
+    pagos = [];
+  }
+
   // Nombre del negocio para el encabezado (env → empresa → fallback). Nunca hardcode.
   let nombreEmpresa: string | null = null;
   try {
@@ -556,7 +602,7 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
 
   const seccionesHtml = copias
     .map((tipo, idx) =>
-      renderCopia({ tipo, venta, items, brief, fontPx, isLast: idx === copias.length - 1, negocio })
+      renderCopia({ tipo, venta, items, brief, fontPx, isLast: idx === copias.length - 1, negocio, pagos })
     )
     .join("");
 

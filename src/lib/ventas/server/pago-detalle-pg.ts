@@ -118,6 +118,33 @@ export async function updateEntidadBancaria(
 }
 
 /**
+ * Borra una entidad bancaria. Si ya fue usada en algun pago, NO se borra:
+ * eso rompería el historial. En ese caso se informa para que se desactive.
+ */
+export async function deleteEntidadBancaria(
+  schemaRaw: string,
+  empresaId: string,
+  id: string
+): Promise<{ deleted: boolean; enUso: boolean }> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const t = quoteSchemaTable(schema, "entidades_bancarias");
+  const tPagos = quoteSchemaTable(schema, "ventas_pagos_detalle");
+
+  const { rows: uso } = await pool().query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM ${tPagos}
+      WHERE empresa_id = $1::uuid AND entidad_bancaria_id = $2::uuid`,
+    [empresaId, id]
+  );
+  if (Number(uso[0]?.n ?? 0) > 0) return { deleted: false, enUso: true };
+
+  const { rowCount } = await pool().query(
+    `DELETE FROM ${t} WHERE id = $1::uuid AND empresa_id = $2::uuid`,
+    [id, empresaId]
+  );
+  return { deleted: (rowCount ?? 0) > 0, enUso: false };
+}
+
+/**
  * Inserta 1 detalle de cobro para una venta. Devuelve el id, o null si falla
  * (best-effort: el caller ignora el error para no romper la venta).
  */
