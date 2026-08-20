@@ -65,9 +65,15 @@ export default function EditarProductoPage() {
 
   // Relaciones
   const [categoriaId, setCategoriaId] = useState<string | null>(null);
+  const [marcaId, setMarcaId] = useState<string | null>(null);
+  const [lineaId, setLineaId] = useState<string | null>(null);
+  const [manejaSeries, setManejaSeries] = useState(false);
+  const [garantiaMeses, setGarantiaMeses] = useState("");
   const [ubicacionId, setUbicacionId] = useState<string | null>(null);
   const [proveedorId, setProveedorId] = useState<string | null>(null);
   const [categorias, setCategorias] = useState<CatRow[]>([]);
+  const [marcas, setMarcas] = useState<CatRow[]>([]);
+  const [lineas, setLineas] = useState<CatRow[]>([]);
   const [ubicaciones, setUbicaciones] = useState<UbiRow[]>([]);
   const [proveedores, setProveedores] = useState<ProvRow[]>([]);
 
@@ -120,15 +126,19 @@ export default function EditarProductoPage() {
       } catch { return null; }
     }
     (async () => {
-      const [cats, ubis, provs] = await Promise.all([
+      const [cats, ubis, provs, mrc, lns] = await Promise.all([
         load("/api/inventario/categorias"),
         load("/api/inventario/ubicaciones"),
         load("/api/proveedores"),
+        load("/api/marcas"),
+        load("/api/lineas-producto"),
       ]);
       if (cancel) return;
       if (cats?.categorias) setCategorias(cats.categorias as CatRow[]);
       if (ubis?.ubicaciones) setUbicaciones(ubis.ubicaciones as UbiRow[]);
       if (provs?.proveedores) setProveedores(provs.proveedores as ProvRow[]);
+      if (mrc?.filas) setMarcas(mrc.filas as CatRow[]);
+      if (lns?.filas) setLineas(lns.filas as CatRow[]);
     })();
     return () => { cancel = true; };
   }, []);
@@ -220,6 +230,10 @@ export default function EditarProductoPage() {
       setImagenPath(p.imagen_path ?? null);
       setImagenUrl(p.imagen_url ?? null);
       setCategoriaId(p.categoria_principal_id ?? null);
+      setMarcaId(p.marca_id ?? null);
+      setLineaId(p.linea_id ?? null);
+      setManejaSeries(p.maneja_series === true);
+      setGarantiaMeses(p.garantia_meses != null ? String(p.garantia_meses) : "");
       setUbicacionId(p.ubicacion_principal_id ?? null);
       setProveedorId(p.proveedor_principal_id ?? null);
       const esVend = p.es_vendible ?? true;
@@ -373,6 +387,10 @@ export default function EditarProductoPage() {
         unidad_medida: form.unidad_medida.trim().toUpperCase() || "UNIDAD",
         metodo_valuacion: form.metodo_valuacion,
         categoria_principal_id: categoriaId,
+        marca_id: marcaId,
+        linea_id: lineaId,
+        maneja_series: manejaSeries,
+        garantia_meses: garantiaMeses.trim() === "" ? null : parseInt(garantiaMeses, 10) || null,
         ubicacion_principal_id: ubicacionId,
         proveedor_principal_id: proveedorId,
         es_vendible: esVendible,
@@ -673,6 +691,78 @@ export default function EditarProductoPage() {
                     + Crear
                   </Link>
                 </div>
+              </div>
+
+              <div className="md:col-span-4 min-w-0">
+                <label className={labelClass}>Marca</label>
+                <SelectFromList
+                  value={marcaId}
+                  onChange={setMarcaId}
+                  options={marcas.map((m) => ({ id: m.id, label: m.nombre }))}
+                  emptyShort="Sin marcas"
+                />
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-xs text-gray-400 truncate">
+                    {marcas.length === 0 ? "Todavía no cargaste marcas." : `${marcas.length} disponibles`}
+                  </span>
+                  <Link
+                    href="/inventario/marcas"
+                    className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-sky-700 hover:text-sky-900 border border-sky-200 hover:bg-sky-50 px-2.5 py-1 rounded-md transition-colors"
+                  >
+                    + Crear
+                  </Link>
+                </div>
+              </div>
+
+              <div className="md:col-span-4 min-w-0">
+                <label className={labelClass}>Línea de producto</label>
+                <SelectFromList
+                  value={lineaId}
+                  onChange={setLineaId}
+                  options={lineas.map((l) => ({ id: l.id, label: l.nombre }))}
+                  emptyShort="Sin líneas"
+                />
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-xs text-gray-400 truncate">
+                    {lineas.length === 0 ? "Todavía no cargaste líneas." : `${lineas.length} disponibles`}
+                  </span>
+                  <Link
+                    href="/inventario/lineas"
+                    className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-sky-700 hover:text-sky-900 border border-sky-200 hover:bg-sky-50 px-2.5 py-1 rounded-md transition-colors"
+                  >
+                    + Crear
+                  </Link>
+                </div>
+              </div>
+
+              <div className="md:col-span-8 min-w-0 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={manejaSeries}
+                    onChange={(e) => setManejaSeries(e.target.checked)}
+                    className="mt-0.5 h-4 w-4"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-slate-800">Controlar por número de serie</span>
+                    <span className="block text-xs text-slate-500">
+                      Para equipos donde importa la unidad concreta (televisores, electrodomésticos).
+                    </span>
+                  </span>
+                </label>
+              </div>
+
+              <div className="md:col-span-4 min-w-0">
+                <label className={labelClass}>Garantía (meses)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={garantiaMeses}
+                  onChange={(e) => setGarantiaMeses(e.target.value)}
+                  placeholder="Ej: 12"
+                  className={inputClass}
+                />
               </div>
               <div className={`md:col-span-4 min-w-0 ${tipoGastro === "menu" ? "hidden" : ""}`}>
                 <label className={labelClass}>Proveedor principal</label>

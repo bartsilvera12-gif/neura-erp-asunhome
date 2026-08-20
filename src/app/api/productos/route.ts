@@ -15,6 +15,8 @@ const PRODUCTO_COLS =
   "unidad_medida, metodo_valuacion, activo, created_at, updated_at, " +
   "codigo_barras, codigo_barras_interno, imagen_path, imagen_url, " +
   "categoria_principal_id, ubicacion_principal_id, proveedor_principal_id, " +
+  // ASUNHOME: marca, linea de producto, manejo por numero de serie.
+  "marca_id, linea_id, maneja_series, garantia_meses, " +
   "es_vendible, es_insumo, controla_stock, destacado, oferta_semana_destacada, valorizado, unidad_compra, unidad_receta, " +
   "factor_compra_receta, tiempo_prep_minutos, descripcion, precio_mayorista, cantidad_minima_mayorista, precio_distribuidor, modo_receta, " +
   "discount_type, discount_value, discount_starts_at, discount_ends_at";
@@ -174,6 +176,13 @@ export async function POST(request: NextRequest) {
     const categoriaPrincipalId = body.categoria_principal_id ? String(body.categoria_principal_id) : null;
     const ubicacionPrincipalId = body.ubicacion_principal_id ? String(body.ubicacion_principal_id) : null;
     const proveedorPrincipalId = body.proveedor_principal_id ? String(body.proveedor_principal_id) : null;
+    const marcaId = body.marca_id ? String(body.marca_id) : null;
+    const lineaId = body.linea_id ? String(body.linea_id) : null;
+    const manejaSeries = body.maneja_series === true;
+    const garantiaMeses =
+      body.garantia_meses !== undefined && body.garantia_meses !== null && body.garantia_meses !== ""
+        ? Math.max(0, Math.floor(Number(body.garantia_meses) || 0))
+        : null;
 
     const esVendible = typeof body.es_vendible === "boolean" ? body.es_vendible : undefined;
     const esInsumo = typeof body.es_insumo === "boolean" ? body.es_insumo : undefined;
@@ -251,6 +260,10 @@ export async function POST(request: NextRequest) {
       categoria_principal_id: categoriaPrincipalId,
       ubicacion_principal_id: ubicacionPrincipalId,
       proveedor_principal_id: proveedorPrincipalId,
+      marca_id: marcaId,
+      linea_id: lineaId,
+      maneja_series: manejaSeries,
+      garantia_meses: garantiaMeses,
     };
     if (esVendible !== undefined) insertPayload.es_vendible = esVendible;
     if (esInsumo !== undefined) insertPayload.es_insumo = esInsumo;

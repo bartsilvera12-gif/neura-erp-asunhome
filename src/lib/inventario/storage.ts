@@ -33,6 +33,11 @@ interface ProductoRow {
   categoria_principal_id?: string | null;
   ubicacion_principal_id?: string | null;
   proveedor_principal_id?: string | null;
+  /** ASUNHOME: marca, línea comercial y control por número de serie. */
+  marca_id?: string | null;
+  linea_id?: string | null;
+  maneja_series?: boolean | null;
+  garantia_meses?: number | null;
   es_vendible?: boolean | null;
   es_insumo?: boolean | null;
   controla_stock?: boolean | null;
@@ -92,6 +97,10 @@ function rowToProducto(row: ProductoRow): Producto {
     categoria_principal_id: row.categoria_principal_id ?? null,
     ubicacion_principal_id: row.ubicacion_principal_id ?? null,
     proveedor_principal_id: row.proveedor_principal_id ?? null,
+    marca_id: row.marca_id ?? null,
+    linea_id: row.linea_id ?? null,
+    maneja_series: row.maneja_series ?? false,
+    garantia_meses: row.garantia_meses ?? null,
     es_vendible: row.es_vendible ?? true,
     es_insumo: row.es_insumo ?? false,
     controla_stock: row.controla_stock ?? true,

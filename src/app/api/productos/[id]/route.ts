@@ -10,6 +10,7 @@ const PRODUCTO_COLS =
   "unidad_medida, metodo_valuacion, activo, created_at, updated_at, " +
   "codigo_barras, codigo_barras_interno, imagen_path, imagen_url, " +
   "categoria_principal_id, ubicacion_principal_id, proveedor_principal_id, " +
+  "marca_id, linea_id, maneja_series, garantia_meses, " +
   "es_vendible, es_insumo, controla_stock, destacado, oferta_semana_destacada, discount_type, discount_value, discount_starts_at, discount_ends_at, valorizado, unidad_compra, unidad_receta, " +
   "factor_compra_receta, tiempo_prep_minutos, descripcion, precio_mayorista, cantidad_minima_mayorista, precio_distribuidor, modo_receta";
 
@@ -37,7 +38,7 @@ function rowToApi(r: Record<string, unknown>): Record<string, unknown> {
 
 async function existsId(
   sb: AppSupabaseClient,
-  table: "categorias_productos" | "inventario_ubicaciones" | "proveedores",
+  table: "categorias_productos" | "inventario_ubicaciones" | "proveedores" | "marcas" | "lineas_producto",
   empresaId: string,
   id: string
 ): Promise<boolean> {
@@ -132,6 +133,28 @@ export async function PATCH(
         return NextResponse.json(errorResponse("La ubicación seleccionada no existe."), { status: 400 });
       }
       patch.ubicacion_principal_id = v;
+    }
+    if (body.marca_id !== undefined) {
+      const v = body.marca_id == null ? null : String(body.marca_id);
+      if (v && !(await existsId(sb, "marcas", empresaId, v))) {
+        return NextResponse.json(errorResponse("La marca seleccionada no existe."), { status: 400 });
+      }
+      patch.marca_id = v;
+    }
+    if (body.linea_id !== undefined) {
+      const v = body.linea_id == null ? null : String(body.linea_id);
+      if (v && !(await existsId(sb, "lineas_producto", empresaId, v))) {
+        return NextResponse.json(errorResponse("La línea de producto seleccionada no existe."), { status: 400 });
+      }
+      patch.linea_id = v;
+    }
+    if (body.maneja_series !== undefined) {
+      patch.maneja_series = body.maneja_series === true;
+    }
+    if (body.garantia_meses !== undefined) {
+      const raw = body.garantia_meses;
+      patch.garantia_meses =
+        raw === null || raw === "" ? null : Math.max(0, Math.floor(Number(raw) || 0));
     }
     if (body.proveedor_principal_id !== undefined) {
       const v = body.proveedor_principal_id == null ? null : String(body.proveedor_principal_id);
