@@ -237,8 +237,9 @@ export async function GET(
 <title>Comprobante ${escapeHtml(numeroControl)} — Ferrecolor</title>
 <style>
   * { box-sizing: border-box; }
-  /* El tamaño lo fija el selector de hoja (#hoja-css). Dejarlo aquí fijo
-     bloquea el desplegable de papel del diálogo de impresión de Chrome. */
+  /* Sin tamaño fijo: así el desplegable de papel del diálogo de Chrome queda
+     habilitado y el usuario elige A4/Carta/Oficio ahí mismo. */
+  @page { margin: 8mm; }
   html, body { margin: 0; padding: 0; background: #f1f1f1; color: #111; font-family: 'Courier New', ui-monospace, monospace; font-size: 11.5px; }
   .hoja {
     background: #fff;
@@ -321,29 +322,10 @@ export async function GET(
     text-align: right; font-weight: 700; padding-top: 6px; font-size: 13px;
   }
 
-  .print-bar {
-    position: fixed; top: 12px; right: 12px; z-index: 20;
-    display: flex; align-items: center; gap: 8px;
-    background: #fff; border: 1px solid #d8e2e2; border-radius: 8px;
-    padding: 8px 10px; box-shadow: 0 2px 10px rgba(0,0,0,.08);
-    font-family: system-ui, sans-serif; font-size: 13px;
-  }
-  .print-bar label { color: #55706f; font-size: 12px; }
-  .print-bar select {
-    font: inherit; padding: 5px 8px; border: 1px solid #d8e2e2;
-    border-radius: 6px; background: #fff; color: #111;
-  }
-  .print-btn {
-    position: fixed; top: 12px; right: 12px; background: #4FAEB2; color: #fff;
-    border: 0; padding: 8px 14px; border-radius: 8px; font-family: inherit; font-size: 13px;
-    font-weight: 700; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.2);
-  }
-  .print-btn:hover { background: #3F8E91; }
   @media print {
     html, body { background: #fff; font-size: 10.5px; }
     .hoja { box-shadow: none; margin: 0; width: auto; min-height: 0; padding: 4mm 6mm; }
-    .print-bar { display: none; }
-    .header-top { margin-bottom: 6px; }
+      .header-top { margin-bottom: 6px; }
     .header-top .logo { max-height: 42px; }
     .fecha-top { font-size: 11px; }
     .info { gap: 20px; margin-bottom: 6px; }
@@ -360,38 +342,11 @@ export async function GET(
   }
 </style></head>
 <body>
-  <style id="hoja-css">@page { size: A4 portrait; margin: 8mm; }</style>
-  <div class="print-bar">
-    <label for="hoja">Hoja</label>
-    <select id="hoja">
-      <option value="A4 portrait">A4 vertical</option>
-      <option value="A4 landscape">A4 horizontal</option>
-      <option value="Letter portrait">Carta vertical</option>
-      <option value="Letter landscape">Carta horizontal</option>
-      <option value="Legal portrait">Oficio vertical</option>
-      <option value="auto">Automático (elegir en el diálogo)</option>
-    </select>
-    <button class="print-btn" onclick="window.print()">Imprimir</button>
-  </div>
   <script>
     (function () {
-      var sel = document.getElementById("hoja");
-      var css = document.getElementById("hoja-css");
-      var KEY = "asunhome.hoja.comprobante";
-      try { var g = localStorage.getItem(KEY); if (g) sel.value = g; } catch (e) {}
-      function aplicar() {
-        css.textContent = sel.value === "auto"
-          ? "@page { margin: 8mm; }"
-          : "@page { size: " + sel.value + "; margin: 8mm; }";
-        try { localStorage.setItem(KEY, sel.value); } catch (e) {}
-      }
-      sel.addEventListener("change", aplicar);
-      aplicar();
-
-      // Abrir directo en el diálogo de impresión: el comprobante se abre para
-      // imprimir, no para mirarlo. Si se cancela queda la hoja en pantalla con
-      // el selector, para cambiar el tamaño y reintentar.
-      // ?ver=1 en la URL lo desactiva.
+      // El comprobante se abre para imprimir, no para mirarlo: dispara el
+      // diálogo de impresión al cargar. El tamaño de hoja (A4/Carta/Oficio) se
+      // elige en el propio diálogo de Chrome. ?ver=1 en la URL lo desactiva.
       if (new URLSearchParams(location.search).get("ver") !== "1") {
         window.addEventListener("load", function () {
           setTimeout(function () { window.print(); }, 250);
