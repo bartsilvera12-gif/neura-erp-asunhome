@@ -10,10 +10,6 @@ import type { MetodoValuacion } from "@/lib/inventario/types";
 import { ShoppingBag, Boxes, ClipboardList, type LucideIcon } from "lucide-react";
 
 // Opciones estándar de unidad de medida para gastro
-const UNIDADES_OPCIONES = [
-  "UNIDAD","KG","G","LT","ML","CAJA","BOLSA","PAQUETE","DOCENA","LATA","BOTELLA","PORCION","COMBO",
-] as const;
-
 const TIPO_SUMMARY: Record<"reventa" | "menu" | "materia", { titulo: string; descripcion: string; Icon: LucideIcon; acento: string }> = {
   reventa: { titulo: "Producto de reventa", descripcion: "Se compra y se vende tal cual. Controla stock y descuenta al vender.", Icon: ShoppingBag, acento: "text-sky-600" },
   menu:    { titulo: "Producto del menú",   descripcion: "Se vende en Ventas y genera pedido. No descuenta stock directo.",     Icon: ClipboardList, acento: "text-amber-600" },
@@ -347,7 +343,7 @@ export default function NuevoProductoPage() {
           cantidad_minima_mayorista: form.cantidad_minima_mayorista.trim() !== "" ? parseFloat(form.cantidad_minima_mayorista) || null : null,
           stock_actual: parseInt(form.stock_actual) || 0,
           stock_minimo: parseInt(form.stock_minimo) || 0,
-          unidad_medida: form.unidad_medida.trim().toUpperCase(),
+          unidad_medida: "UNIDAD",  // ASUNHOME: la unidad siempre es UNIDAD
           metodo_valuacion: form.metodo_valuacion,
           codigo_barras: codigo,
           codigo_barras_interno: interno,
@@ -611,17 +607,8 @@ export default function NuevoProductoPage() {
 
             <div className={tipoGastro === "menu" ? "hidden" : ""}>
               <label className={labelClass}>Unidad de medida</label>
-              <select
-                name="unidad_medida"
-                value={form.unidad_medida}
-                onChange={handleChange}
-                className={`${inputClass} uppercase`}
-                required={tipoGastro !== "menu"}
-              >
-                {UNIDADES_OPCIONES.map((u) => (
-                  <option key={u} value={u}>{u}</option>
-                ))}
-              </select>
+              {/* ASUNHOME opera todo por unidad: campo fijo, no editable. */}
+              <input type="text" value="UNIDAD" readOnly disabled className={`${inputClass} bg-slate-50 text-slate-500`} />
             </div>
           </div>
 
