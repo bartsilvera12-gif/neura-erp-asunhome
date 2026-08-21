@@ -3,22 +3,18 @@
  * Devuelve HTML con estilos inline para no depender del CSS de cada endpoint
  * (evita duplicar el markup del encabezado en cada documento).
  *
- * SOLO presentación: no toca datos de negocio. Los datos comerciales son fijos
- * de la empresa (Ferretería República).
- *
- * TODO: confirmar datos comerciales reales (razón social, actividad SIFEN,
- * teléfono y dirección) con el equipo. Los valores actuales son placeholders.
+ * SOLO presentación: no toca datos de negocio. Datos comerciales de ASUNHOME.
  */
 
 export const EMPRESA_DOC = {
-  nombre: "Ferrecolor",
+  nombre: "ASUNHOME",
   actividad: [
-    "Comercio al por menor de artículos de ferretería, materiales de construcción y herramientas",
+    "Venta de muebles y artículos para el hogar",
   ],
-  telefono: "",
-  direccion: ["Paraguay"],
+  telefono: "0992265398",
+  direccion: ["Dr. López Moreira 4782 c/ Juan S. Bogarín — Asunción, Recoleta"],
   /** Logo del cliente (alta calidad, sin fondo). Servido desde /public. */
-  logoUrl: "/brand/zentra-logo-official.png",
+  logoUrl: "/brand/asunhome-logo.png",
 };
 
 function esc(v: unknown): string {

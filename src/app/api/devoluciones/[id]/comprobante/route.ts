@@ -169,7 +169,7 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
   <div class="hoja">
     <div class="header-top">
       <div class="brand">
-        <img src="/brand/zentra-logo-official.png" alt="ASUNHOME" class="logo" />
+        <img src="/brand/asunhome-logo.png" alt="ASUNHOME" class="logo" />
         <div class="empresa-datos">
           <div class="razon">${escapeHtml(emisor.razonSocial)}</div>
           ${emisor.ruc ? `<div>R.U.C.: ${escapeHtml(emisor.ruc)}</div>` : ""}

@@ -112,16 +112,16 @@ export default function Header() {
             className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 shadow-sm transition-all hover:border-[#4FAEB2]/60"
           >
             <div
-              className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white"
-              style={{ boxShadow: "0 0 0 3px rgba(79, 174, 178, 0.25)" }}
+              className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white p-0.5"
+              style={{ boxShadow: "0 0 0 2px rgba(79, 174, 178, 0.25)" }}
             >
               <Image
-                src="/brand/zentra-logo-official.png"
+                src="/brand/asunhome-avatar.png"
                 alt="ASUNHOME"
                 width={120}
                 height={120}
                 sizes="36px"
-                className="h-full w-full object-cover scale-150"
+                className="h-full w-full object-contain"
                 priority
               />
             </div>
