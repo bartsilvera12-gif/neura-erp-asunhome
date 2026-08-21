@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import MontoInput from "@/components/ui/MontoInput";
 import SelectFromList from "@/components/inventario/SelectFromList";
 import { productoExiste, saveProducto } from "@/lib/inventario/storage";
+import { cargarSeries } from "@/lib/inventario/series";
 import type { MetodoValuacion } from "@/lib/inventario/types";
 import { ShoppingBag, Boxes, ClipboardList, type LucideIcon } from "lucide-react";
 
@@ -53,6 +54,7 @@ export default function NuevoProductoPage() {
   const [lineaId, setLineaId] = useState<string | null>(null);
   const [manejaSeries, setManejaSeries] = useState(false);
   const [garantiaMeses, setGarantiaMeses] = useState("");
+  const [seriesTexto, setSeriesTexto] = useState("");
   const [ubicacionId, setUbicacionId] = useState<string | null>(null);
   const [proveedorId, setProveedorId] = useState<string | null>(null);
 
@@ -377,6 +379,24 @@ export default function NuevoProductoPage() {
       if (!guardado) {
         showErr("No se pudo guardar el producto. Revisá los datos e intentá nuevamente.");
         return;
+      }
+
+      // Cargar los números de serie del stock inicial (si el producto los maneja).
+      if (manejaSeries && seriesTexto.trim()) {
+        const nums = seriesTexto
+          .split(/\r?\n/)
+          .map((x) => x.trim())
+          .filter(Boolean)
+          .map((numero_serie) => ({ numero_serie, proveedor_id: proveedorId }));
+        if (nums.length > 0) {
+          const rs = await cargarSeries(guardado.id, nums);
+          if (rs.ok && rs.data.duplicadas.length > 0) {
+            alert(
+              `Producto creado. Se cargaron ${rs.data.creadas} serie(s).\n` +
+              `Estas ya existían y se omitieron: ${rs.data.duplicadas.join(", ")}`
+            );
+          }
+        }
       }
 
       // Subir imagen (post-creacion, con producto_id real)
@@ -1251,6 +1271,23 @@ export default function NuevoProductoPage() {
               <p className="mt-2 text-xs text-gray-400">
                 Se generará automáticamente un movimiento de inventario inicial con {form.stock_actual} unidades al guardar.
               </p>
+            )}
+
+            {manejaSeries && (
+              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                <label className={labelClass}>Números de serie del stock inicial</label>
+                <textarea
+                  value={seriesTexto}
+                  onChange={(e) => setSeriesTexto(e.target.value)}
+                  rows={4}
+                  placeholder={"Una serie por línea. Ej:\nSN-A1B2C3\nSN-D4E5F6"}
+                  className={`${inputClass} font-mono text-sm`}
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Este producto maneja número de serie. Cargá una serie por línea (opcional acá;
+                  también podés cargarlas después desde una compra).
+                </p>
+              </div>
             )}
           </div>
 

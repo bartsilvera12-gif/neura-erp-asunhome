@@ -130,6 +130,7 @@ const MENU_STRUCTURE: MenuItem[] = [
     { label: "Categorías", href: "/inventario/categorias" },
     { label: "Marcas", href: "/inventario/marcas" },
     { label: "Líneas de producto", href: "/inventario/lineas" },
+    { label: "Números de serie", href: "/inventario/series" },
     // ASUNHOME sí usa ubicaciones: separa stock de salón y de depósito.
     { label: "Depósitos / Ubicaciones", href: "/inventario/ubicaciones" },
   ]},
