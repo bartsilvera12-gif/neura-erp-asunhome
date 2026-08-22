@@ -3,7 +3,7 @@
 export type TipoDevolucion = "total" | "parcial";
 export type ResolucionDevolucion = "reembolso" | "cambio";
 export type EstadoDevolucion = "confirmada" | "anulada";
-export type CondicionProducto = "buen_estado" | "danado";
+export type CondicionProducto = "buen_estado" | "danado" | "averiado";
 export type MetodoReembolso = "efectivo" | "tarjeta" | "transferencia";
 
 /** Linea de la venta con lo ya devuelto (para armar el paso 1 del wizard). */

@@ -143,7 +143,7 @@ export default function DevolucionWizard({ ventaId, onClose, onDone }: Props) {
             venta_item_id: l.venta_item_id,
             cantidad: cant[l.venta_item_id],
             condicion: cond[l.venta_item_id] ?? "buen_estado",
-            reintegra_stock: (cond[l.venta_item_id] ?? "buen_estado") === "buen_estado",
+            reintegra_stock: (cond[l.venta_item_id] ?? "buen_estado") !== "danado",
           })),
           cambios: resolucion === "cambio" ? cambios.map((c) => ({ producto_id: c.producto_id, cantidad: c.cantidad })) : [],
         }),
@@ -235,16 +235,24 @@ export default function DevolucionWizard({ ventaId, onClose, onDone }: Props) {
                     </div>
                     {c > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2 border-t border-slate-100 pt-2">
-                        {(["buen_estado", "danado"] as const).map((op) => (
-                          <button key={op} type="button"
-                            onClick={() => setCond((p) => ({ ...p, [l.venta_item_id]: op }))}
-                            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                              cd === op
-                                ? op === "danado" ? "border-red-300 bg-red-50 text-red-700" : "border-emerald-300 bg-emerald-50 text-emerald-700"
-                                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-                            {op === "buen_estado" ? "Vuelve al stock" : "Dañado / no vuelve al stock"}
-                          </button>
-                        ))}
+                        {(["buen_estado", "averiado", "danado"] as const).map((op) => {
+                          const activo =
+                            op === "danado" ? "border-red-300 bg-red-50 text-red-700"
+                            : op === "averiado" ? "border-amber-300 bg-amber-50 text-amber-700"
+                            : "border-emerald-300 bg-emerald-50 text-emerald-700";
+                          const label =
+                            op === "buen_estado" ? "Vuelve al stock"
+                            : op === "averiado" ? "Averiado (vuelve, marcado)"
+                            : "Dañado / no vuelve";
+                          return (
+                            <button key={op} type="button"
+                              onClick={() => setCond((p) => ({ ...p, [l.venta_item_id]: op }))}
+                              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                                cd === op ? activo : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                              {label}
+                            </button>
+                          );
+                        })}
                         <span className="ml-auto self-center text-sm font-bold text-slate-800">{gs(l.precio_unitario * c)}</span>
                       </div>
                     )}

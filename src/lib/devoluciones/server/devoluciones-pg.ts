@@ -283,7 +283,7 @@ export async function crearDevolucion(
       const total = round2(precio * cant);
       const iva = round2(calcIvaIncluido(tipoIva, total));
       totalDevuelto = round2(totalDevuelto + total);
-      // Un producto danado NUNCA reintegra stock.
+      // Danado no reintegra. Averiado SÍ vuelve al stock (queda marcado como averiado).
       const reintegra = it.condicion === "danado" ? false : it.reintegra_stock !== false;
       return {
         venta_item_id: it.venta_item_id,
@@ -442,6 +442,19 @@ export async function crearDevolucion(
           num(p.costo_promedio), numero, input.venta_id, devolucionId, usuario.id, usuario.nombre,
         ]
       );
+
+      // Devolución averiada: el producto volvió al stock pero queda registrado
+      // como averiado (motivo cliente) para que aparezca en el módulo Averiados.
+      if (it.condicion === "averiado") {
+        const tAV = quoteSchemaTable(schema, "productos_averiados");
+        await client.query(
+          `INSERT INTO ${tAV}
+             (empresa_id, producto_id, cantidad, motivo, estado, descripcion, reportado_por)
+           VALUES ($1::uuid,$2::uuid,$3,'cliente','detectado',$4,$5::uuid)`,
+          [empresaId, it.producto_id, it.cantidad_devuelta,
+           `Devolución ${numero} — venta`, usuario.id]
+        );
+      }
     }
 
     // ── 12) Cambios: descuento de stock + movimiento SALIDA.
