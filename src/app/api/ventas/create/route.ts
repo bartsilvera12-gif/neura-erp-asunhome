@@ -4,6 +4,7 @@ import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema"
 import { createVentaTransaccionalPg, StockInsuficienteError } from "@/lib/ventas/server/create-venta-pg";
 import type { CreateVentaItemInput } from "@/lib/ventas/server/create-venta-pg";
 import { insertVentaPagoDetalle } from "@/lib/ventas/server/pago-detalle-pg";
+import { actualizarSerie } from "@/lib/inventario/server/series-pg";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
 import type { Venta, LineaVenta } from "@/lib/ventas/types";
@@ -394,6 +395,26 @@ export async function POST(request: NextRequest) {
       sub += it.subtotal;
       iv += it.monto_iva;
       tot += it.total_linea;
+    }
+
+    // Marcar como vendidas las series elegidas en la UI (best-effort: no rompe
+    // la venta si falla). Cada item puede traer series_ids con las unidades.
+    try {
+      const rawItems = Array.isArray(o.items) ? (o.items as Record<string, unknown>[]) : [];
+      for (const ri of rawItems) {
+        const serieIds = Array.isArray(ri.series_ids) ? (ri.series_ids as unknown[]) : [];
+        for (const sid of serieIds) {
+          if (typeof sid !== "string" || !sid) continue;
+          await actualizarSerie(schema, auth.empresa_id, sid, {
+            estado: "vendido",
+            venta_id: ventaId,
+            cliente_id: clienteId,
+            fecha_venta: fechaIso,
+          });
+        }
+      }
+    } catch (e) {
+      console.error("[ventas/create] marcado de series:", e instanceof Error ? e.message : e);
     }
 
     const venta = toVentaResponse(items, {
