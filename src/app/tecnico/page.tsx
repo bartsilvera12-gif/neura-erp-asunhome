@@ -56,6 +56,8 @@ export default function TecnicoPage() {
   // Series disponibles del producto interno elegido, para elegir cuál unidad va al técnico.
   const [seriesDisp, setSeriesDisp] = useState<{ id: string; numero_serie: string }[]>([]);
   const [serieId, setSerieId] = useState("");
+  // Orden interna a la que se le está confirmando "listo" (vuelve al stock o no).
+  const [confirmListo, setConfirmListo] = useState<Orden | null>(null);
 
   const reload = useCallback(async () => {
     setCargando(true);
@@ -140,17 +142,21 @@ export default function TecnicoPage() {
     }
   }
 
-  async function cambiarEstado(o: Orden, estado: Estado) {
-    // Si una orden interna se marca "listo", ofrecer reintegrar al stock.
-    let reintegrar = false;
-    if (estado === "listo" && o.origen === "interno") {
-      reintegrar = window.confirm("¿El producto quedó reparado y vuelve al stock?");
-    }
+  async function aplicarEstado(o: Orden, estado: Estado, reintegrar: boolean) {
     await fetch("/api/tecnico", {
       method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
       body: JSON.stringify({ id: o.id, estado, reintegrar_stock: reintegrar }),
     });
     await reload();
+  }
+
+  function cambiarEstado(o: Orden, estado: Estado) {
+    // Orden interna marcada "listo": preguntar (con modal propio) si vuelve al stock.
+    if (estado === "listo" && o.origen === "interno") {
+      setConfirmListo(o);
+      return;
+    }
+    void aplicarEstado(o, estado, false);
   }
 
   return (
@@ -282,6 +288,42 @@ export default function TecnicoPage() {
         {!cargando && filas.length === 0 && <p className="py-10 text-center text-slate-400">No hay órdenes en el técnico.</p>}
         {cargando && <p className="py-10 text-center text-slate-400">Cargando…</p>}
       </div>
+
+      {confirmListo && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tec-dlg-titulo"
+          onClick={() => setConfirmListo(null)}
+        >
+          <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 id="tec-dlg-titulo" className="text-base font-semibold text-slate-900">Marcar como listo</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              La orden <span className="font-mono">{confirmListo.numero}</span> de{" "}
+              <span className="font-medium">{confirmListo.producto_nombre ?? "el producto"}</span> queda lista.
+              ¿El producto quedó reparado y vuelve al stock?
+            </p>
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { const o = confirmListo; setConfirmListo(null); void aplicarEstado(o, "listo", false); }}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              >
+                No, solo marcar listo
+              </button>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => { const o = confirmListo; setConfirmListo(null); void aplicarEstado(o, "listo", true); }}
+                className="rounded-lg bg-[#0EA5E9] px-4 py-2 text-sm font-medium text-white hover:bg-[#0284C7]"
+              >
+                Sí, vuelve al stock
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
