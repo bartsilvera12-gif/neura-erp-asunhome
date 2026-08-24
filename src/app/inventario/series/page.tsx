@@ -13,6 +13,7 @@ import {
   getSeries, SERIE_ESTADO_LABEL,
   type Serie, type SerieEstado,
 } from "@/lib/inventario/series";
+import { FancySelect } from "@/components/ui/FancySelect";
 
 const inputClass =
   "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#0EA5E9] outline-none";
@@ -55,6 +56,24 @@ export default function SeriesPage() {
     return () => clearTimeout(t);
   }, [reload]);
 
+  // Agrupar las unidades por producto: no queremos filas sueltas repitiendo el
+  // nombre del producto, sino cada producto con sus series debajo.
+  const grupos = (() => {
+    const map = new Map<string, { producto_id: string | null; producto_nombre: string | null; sku: string | null; unidades: Serie[] }>();
+    for (const s of filas) {
+      const key = s.producto_id ?? "sin";
+      let g = map.get(key);
+      if (!g) {
+        g = { producto_id: s.producto_id, producto_nombre: s.producto_nombre, sku: s.sku, unidades: [] };
+        map.set(key, g);
+      }
+      g.unidades.push(s);
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      (a.producto_nombre ?? "").localeCompare(b.producto_nombre ?? "")
+    );
+  })();
+
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 px-4 pb-10 sm:px-6 lg:px-8">
       <div>
@@ -66,68 +85,78 @@ export default function SeriesPage() {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <input
-          className={`${inputClass} max-w-xs`}
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar por número de serie o producto…"
-        />
-        <select className={`${inputClass} w-48`} value={estado} onChange={(e) => setEstado(e.target.value as SerieEstado | "")}>
-          <option value="">Todos los estados</option>
-          {ESTADOS.map((e) => <option key={e} value={e}>{SERIE_ESTADO_LABEL[e]}</option>)}
-        </select>
-        <span className="ml-auto text-xs text-slate-500">{filas.length} unidades</span>
-      </div>
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 p-4">
+          <input
+            className={`${inputClass} max-w-xs`}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Buscar por número de serie o producto…"
+          />
+          <FancySelect
+            className="w-52"
+            size="sm"
+            ariaLabel="Filtrar por estado"
+            value={estado}
+            onChange={(v) => setEstado(v as SerieEstado | "")}
+            options={[
+              { value: "", label: "Todos los estados" },
+              ...ESTADOS.map((e) => ({ value: e, label: SERIE_ESTADO_LABEL[e] })),
+            ]}
+          />
+          <span className="ml-auto text-xs text-slate-500">{filas.length} unidades</span>
+        </div>
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-slate-100 text-slate-600">
-              <th className="px-4 py-3 font-semibold">Nº de serie</th>
-              <th className="px-4 py-3 font-semibold">Producto</th>
-              <th className="px-4 py-3 font-semibold">Estado</th>
-              <th className="px-4 py-3 font-semibold">Proveedor de origen</th>
-              <th className="px-4 py-3 font-semibold">Ubicación</th>
-              <th className="px-4 py-3 font-semibold">Ingreso</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filas.map((s) => (
-              <Fragment key={s.id}>
-                <tr
-                  className="cursor-pointer border-b border-slate-50 hover:bg-slate-50/60"
-                  onClick={() => setExpandida(expandida === s.id ? null : s.id)}
-                >
-                  <td className="px-4 py-3 font-mono font-medium text-slate-900">{s.numero_serie}</td>
-                  <td className="px-4 py-3">{s.producto_nombre ?? "—"}<span className="ml-1 text-xs text-slate-400">{s.sku ?? ""}</span></td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-semibold ${ESTADO_BADGE[s.estado]}`}>
-                      {SERIE_ESTADO_LABEL[s.estado]}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{s.proveedor_nombre ?? "—"}</td>
-                  <td className="px-4 py-3 text-slate-600">{s.ubicacion_nombre ?? "—"}</td>
-                  <td className="px-4 py-3 tabular-nums text-slate-500">{fmtFecha(s.fecha_ingreso)}</td>
-                </tr>
-                {expandida === s.id && (
-                  <tr className="border-b border-slate-100 bg-slate-50/40">
-                    <td colSpan={6} className="px-4 py-4">
-                      <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-xs sm:grid-cols-4">
-                        <Dato k="Cliente" v={s.cliente_nombre} />
-                        <Dato k="Fecha de venta" v={fmtFecha(s.fecha_venta)} />
-                        <Dato k="Precio de venta" v={s.precio_venta != null ? `Gs. ${Number(s.precio_venta).toLocaleString("es-PY")}` : "—"} />
-                        <Dato k="Garantía hasta" v={fmtFecha(s.garantia_hasta)} />
-                        <Dato k="Costo" v={s.costo_unitario != null ? `Gs. ${Number(s.costo_unitario).toLocaleString("es-PY")}` : "—"} />
-                        <Dato k="Observaciones" v={s.observaciones} full />
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+        <div className="divide-y divide-slate-100">
+          {grupos.map((g) => (
+            <div key={g.producto_id ?? "sin"}>
+              {/* Cabecera del producto: sus unidades quedan agrupadas debajo. */}
+              <div className="flex items-center gap-3 bg-slate-50/70 px-4 py-2.5">
+                <span className="font-semibold text-slate-900">{g.producto_nombre ?? "Sin producto"}</span>
+                {g.sku && <span className="font-mono text-xs text-slate-400">{g.sku}</span>}
+                <span className="ml-auto rounded-full bg-slate-200/70 px-2 py-0.5 text-xs font-medium text-slate-600">
+                  {g.unidades.length} {g.unidades.length === 1 ? "unidad" : "unidades"}
+                </span>
+              </div>
+              <table className="w-full text-left text-sm">
+                <tbody>
+                  {g.unidades.map((s) => (
+                    <Fragment key={s.id}>
+                      <tr
+                        className="cursor-pointer border-t border-slate-50 hover:bg-slate-50/60"
+                        onClick={() => setExpandida(expandida === s.id ? null : s.id)}
+                      >
+                        <td className="w-40 px-4 py-2.5 font-mono font-medium text-slate-900">{s.numero_serie}</td>
+                        <td className="px-4 py-2.5">
+                          <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-semibold ${ESTADO_BADGE[s.estado]}`}>
+                            {SERIE_ESTADO_LABEL[s.estado]}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-600">{s.proveedor_nombre ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-slate-600">{s.ubicacion_nombre ?? "—"}</td>
+                        <td className="px-4 py-2.5 tabular-nums text-slate-500">{fmtFecha(s.fecha_ingreso)}</td>
+                      </tr>
+                      {expandida === s.id && (
+                        <tr className="border-t border-slate-100 bg-slate-50/40">
+                          <td colSpan={5} className="px-4 py-4">
+                            <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-xs sm:grid-cols-4">
+                              <Dato k="Cliente" v={s.cliente_nombre} />
+                              <Dato k="Fecha de venta" v={fmtFecha(s.fecha_venta)} />
+                              <Dato k="Precio de venta" v={s.precio_venta != null ? `Gs. ${Number(s.precio_venta).toLocaleString("es-PY")}` : "—"} />
+                              <Dato k="Garantía hasta" v={fmtFecha(s.garantia_hasta)} />
+                              <Dato k="Costo" v={s.costo_unitario != null ? `Gs. ${Number(s.costo_unitario).toLocaleString("es-PY")}` : "—"} />
+                              <Dato k="Observaciones" v={s.observaciones} full />
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
         {!cargando && filas.length === 0 && (
           <p className="py-10 text-center text-slate-400">
             No hay unidades con serie{q || estado ? " para ese filtro" : " todavía"}.
