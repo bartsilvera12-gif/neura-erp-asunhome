@@ -969,7 +969,7 @@ export default function ClienteDetailPage() {
 
       {/* ── Panel resumen ─────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="bg-gradient-to-r from-[#0EA5E9] to-[#0284C7] px-6 py-5">
+        <div className="bg-gradient-to-r from-[#0B3A3D] to-[#145053] px-6 py-5">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-4">
               {/* Avatar */}
@@ -981,9 +981,9 @@ export default function ClienteDetailPage() {
               <div>
                 <h1 className="text-xl font-bold text-white leading-tight">{nombre}</h1>
                 <div className="flex items-center gap-3 mt-1 flex-wrap">
-                  <span className="text-gray-300 font-mono text-xs">{cliente.codigo_cliente}</span>
+                  <span className="text-teal-100/80 font-mono text-xs">{cliente.codigo_cliente}</span>
                   {cliente.ruc && (
-                    <span className="text-gray-300 text-xs">RUC: {cliente.ruc}</span>
+                    <span className="text-teal-100/80 text-xs">RUC: {cliente.ruc}</span>
                   )}
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
                     cliente.estado === "activo"
@@ -997,7 +997,7 @@ export default function ClienteDetailPage() {
                       Tributario
                     </span>
                   )}
-                  <span className="text-xs text-gray-400">
+                  <span className="text-xs text-teal-100/70">
                     Cliente desde {formatFecha(cliente.created_at)}
                   </span>
                 </div>
