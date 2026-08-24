@@ -176,6 +176,27 @@ export default function InventarioPage() {
     };
   }, [page, pageSize, search, categoriaId, refreshKey]);
 
+  // Unidades averiadas por producto: se muestran junto al stock para que el
+  // producto devuelto averiado sea visible acá, sin salir del inventario.
+  const [averiadosPorProducto, setAveriadosPorProducto] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/averiados?activos=1", { credentials: "include", cache: "no-store" });
+        const j = await r.json().catch(() => ({}));
+        const filas = (j?.data?.filas ?? []) as Array<{ producto_id: string; cantidad: number }>;
+        const map: Record<string, number> = {};
+        for (const a of filas) {
+          if (!a.producto_id) continue;
+          map[a.producto_id] = (map[a.producto_id] ?? 0) + Number(a.cantidad || 1);
+        }
+        if (!cancel) setAveriadosPorProducto(map);
+      } catch { /* el badge es informativo, no bloquea */ }
+    })();
+    return () => { cancel = true; };
+  }, [refreshKey]);
+
   // Paginacion derivada
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -455,6 +476,14 @@ export default function InventarioPage() {
                             <span className="text-[10px] font-normal opacity-80">
                               {p.unidad_medida}
                             </span>
+                          </span>
+                        )}
+                        {averiadosPorProducto[p.id] > 0 && (
+                          <span
+                            title="Unidades devueltas por el cliente, marcadas como averiadas"
+                            className="mt-1 block text-[10px] font-semibold text-amber-700"
+                          >
+                            {averiadosPorProducto[p.id]} averiado{averiadosPorProducto[p.id] > 1 ? "s" : ""}
                           </span>
                         )}
                       </td>
