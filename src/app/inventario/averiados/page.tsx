@@ -13,11 +13,11 @@ const inputClass =
 type Estado = "detectado" | "en_revision" | "en_garantia_proveedor" | "reparado" | "descartado" | "devuelto_proveedor";
 
 const ESTADO_LABEL: Record<Estado, string> = {
-  detectado: "Detectado",
+  detectado: "Apartado",
   en_revision: "En revisión",
-  en_garantia_proveedor: "En garantía del proveedor",
-  reparado: "Reparado",
-  descartado: "Descartado",
+  en_garantia_proveedor: "Con proveedor",
+  reparado: "Recuperado",
+  descartado: "Dado de baja",
   devuelto_proveedor: "Devuelto al proveedor",
 };
 const ESTADO_BADGE: Record<Estado, string> = {
@@ -124,7 +124,7 @@ export default function AveriadosPage() {
           <Link href="/inventario" className="text-sm text-sky-600 hover:underline">← Inventario</Link>
           <h1 className="mt-2 text-2xl font-bold text-slate-900">Productos averiados</h1>
           <p className="text-sm text-slate-600">
-            Devoluciones de cliente marcadas como averiadas. Siguen contando en stock; acá se ve cuáles hay y su estado.
+            Productos devueltos por el cliente (así les dice la dueña: "averiados"). No están necesariamente rotos. Siguen contando en stock; acá se ve cuáles hay.
           </p>
         </div>
         <button onClick={() => setNuevo(!nuevo)} className="shrink-0 rounded-lg bg-[#0EA5E9] px-4 py-2 text-sm font-medium text-white hover:bg-[#0284C7]">
@@ -147,8 +147,8 @@ export default function AveriadosPage() {
               <input className={inputClass} value={fSerie} onChange={(e) => setFSerie(e.target.value)} placeholder="Opcional" />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Descripción del daño</label>
-              <input className={inputClass} value={fDesc} onChange={(e) => setFDesc(e.target.value)} placeholder="Ej: no enfría" />
+              <label className="mb-1 block text-xs font-medium text-slate-600">Motivo / nota</label>
+              <input className={inputClass} value={fDesc} onChange={(e) => setFDesc(e.target.value)} placeholder="Ej: modelo equivocado" />
             </div>
           </div>
           {error && <p className="text-sm text-rose-600">{error}</p>}
@@ -168,7 +168,7 @@ export default function AveriadosPage() {
                 <th className="px-3 py-2 font-semibold">Producto</th>
                 <th className="px-3 py-2 font-semibold">Nº serie</th>
                 <th className="px-3 py-2 font-semibold">Proveedor</th>
-                <th className="px-3 py-2 font-semibold">Daño</th>
+                <th className="px-3 py-2 font-semibold">Motivo / nota</th>
                 <th className="px-3 py-2 font-semibold">Fecha</th>
                 <th className="px-3 py-2 font-semibold">Estado</th>
               </tr>

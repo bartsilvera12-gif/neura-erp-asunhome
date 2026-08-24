@@ -52,6 +52,10 @@ export default function TecnicoPage() {
   const [clienteNombre, setClienteNombre] = useState("");
   const [equipo, setEquipo] = useState("");
   const [falla, setFalla] = useState("");
+  const [creando, setCreando] = useState(false);
+  // Series disponibles del producto interno elegido, para elegir cuál unidad va al técnico.
+  const [seriesDisp, setSeriesDisp] = useState<{ id: string; numero_serie: string }[]>([]);
+  const [serieId, setSerieId] = useState("");
 
   const reload = useCallback(async () => {
     setCargando(true);
@@ -81,28 +85,59 @@ export default function TecnicoPage() {
     })();
   }, [nuevo, productos.length]);
 
+  // Al elegir un producto interno, cargar sus series disponibles (en stock) para
+  // que el Nº de serie sea un selector, no texto libre.
+  useEffect(() => {
+    if (origen !== "interno" || !productoId) { setSeriesDisp([]); setSerieId(""); return; }
+    let cancel = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/series?disponibles=1&producto=${productoId}`, { credentials: "include", cache: "no-store" });
+        const j = await r.json().catch(() => ({}));
+        if (!cancel) {
+          setSeriesDisp(j?.success ? (j.data.filas ?? []) : []);
+          setSerieId("");
+        }
+      } catch { if (!cancel) setSeriesDisp([]); }
+    })();
+    return () => { cancel = true; };
+  }, [productoId, origen]);
+
   async function crear(e: React.FormEvent) {
     e.preventDefault();
+    if (creando) return; // evita doble orden por doble clic / doble submit
     setError(null);
     const body: Record<string, unknown> = { origen, falla_reportada: falla.trim() || null };
     if (origen === "interno") {
       if (!productoId) { setError("Elegí el producto interno."); return; }
       body.producto_id = productoId;
-      body.numero_serie = numeroSerie.trim() || null;
+      // Si el producto maneja series, se manda la serie elegida (obligatoria).
+      if (seriesDisp.length > 0) {
+        if (!serieId) { setError("Elegí el número de serie que va al técnico."); return; }
+        const s = seriesDisp.find((x) => x.id === serieId);
+        body.serie_id = serieId;
+        body.numero_serie = s?.numero_serie ?? null;
+      }
     } else {
       if (!clienteNombre.trim() && !equipo.trim()) { setError("Indicá el cliente o el equipo."); return; }
       body.cliente_nombre = clienteNombre.trim() || null;
       body.equipo_descripcion = equipo.trim() || null;
       body.numero_serie = numeroSerie.trim() || null;
     }
-    const r = await fetch("/api/tecnico", {
-      method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-      body: JSON.stringify(body),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok || !j?.success) { setError(j?.error ?? "No se pudo crear."); return; }
-    setNuevo(false); setProductoId(""); setNumeroSerie(""); setClienteNombre(""); setEquipo(""); setFalla("");
-    await reload();
+    setCreando(true);
+    try {
+      const r = await fetch("/api/tecnico", {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.success) { setError(j?.error ?? "No se pudo crear."); return; }
+      setNuevo(false); setProductoId(""); setNumeroSerie(""); setSerieId(""); setSeriesDisp([]);
+      setClienteNombre(""); setEquipo(""); setFalla("");
+      await reload();
+    } finally {
+      setCreando(false);
+    }
   }
 
   async function cambiarEstado(o: Orden, estado: Estado) {
@@ -157,7 +192,19 @@ export default function TecnicoPage() {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Nº de serie</label>
-                <input className={inputClass} value={numeroSerie} onChange={(e) => setNumeroSerie(e.target.value)} placeholder="Opcional" />
+                {!productoId ? (
+                  <input className={`${inputClass} bg-slate-50 text-slate-400`} disabled placeholder="Elegí primero un producto" />
+                ) : seriesDisp.length > 0 ? (
+                  <>
+                    <select className={inputClass} value={serieId} onChange={(e) => setSerieId(e.target.value)}>
+                      <option value="">Elegí la unidad…</option>
+                      {seriesDisp.map((s) => <option key={s.id} value={s.id}>{s.numero_serie}</option>)}
+                    </select>
+                    <p className="mt-1 text-xs text-slate-500">{seriesDisp.length} en stock. Elegí cuál va al técnico.</p>
+                  </>
+                ) : (
+                  <input className={`${inputClass} bg-slate-50 text-slate-400`} disabled placeholder="Este producto no maneja series" />
+                )}
               </div>
             </div>
           ) : (
@@ -181,7 +228,7 @@ export default function TecnicoPage() {
             <input className={inputClass} value={falla} onChange={(e) => setFalla(e.target.value)} placeholder="Ej: no enciende" />
           </div>
           {error && <p className="text-sm text-rose-600">{error}</p>}
-          <button type="submit" className="rounded-lg bg-[#0EA5E9] px-4 py-2 text-sm font-medium text-white hover:bg-[#0284C7]">Crear orden</button>
+          <button type="submit" disabled={creando} className="rounded-lg bg-[#0EA5E9] px-4 py-2 text-sm font-medium text-white hover:bg-[#0284C7] disabled:opacity-50">{creando ? "Creando…" : "Crear orden"}</button>
         </form>
       )}
 
