@@ -124,7 +124,7 @@ export default function AveriadosPage() {
           <Link href="/inventario" className="text-sm text-sky-600 hover:underline">← Inventario</Link>
           <h1 className="mt-2 text-2xl font-bold text-slate-900">Productos averiados</h1>
           <p className="text-sm text-slate-600">
-            Productos devueltos por el cliente (así les dice la dueña: "averiados"). No están necesariamente rotos. Siguen contando en stock; acá se ve cuáles hay.
+            Productos devueltos por el cliente que se apartan del stock vendible como "averiados". Siguen contando en inventario; acá se ve cuáles hay y en qué estado.
           </p>
         </div>
         <button onClick={() => setNuevo(!nuevo)} className="shrink-0 rounded-lg bg-[#0EA5E9] px-4 py-2 text-sm font-medium text-white hover:bg-[#0284C7]">

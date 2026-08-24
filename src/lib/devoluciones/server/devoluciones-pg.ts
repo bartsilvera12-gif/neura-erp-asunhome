@@ -442,19 +442,22 @@ export async function crearDevolucion(
           num(p.costo_promedio), numero, input.venta_id, devolucionId, usuario.id, usuario.nombre,
         ]
       );
+    }
 
-      // Devolución averiada: el producto volvió al stock pero queda registrado
-      // como averiado (motivo cliente) para que aparezca en el módulo Averiados.
-      if (it.condicion === "averiado") {
-        const tAV = quoteSchemaTable(schema, "productos_averiados");
-        await client.query(
-          `INSERT INTO ${tAV}
-             (empresa_id, producto_id, cantidad, motivo, estado, descripcion, reportado_por)
-           VALUES ($1::uuid,$2::uuid,$3,'cliente','detectado',$4,$5::uuid)`,
-          [empresaId, it.producto_id, it.cantidad_devuelta,
-           `Devolución ${numero} — venta`, usuario.id]
-        );
-      }
+    // ── 11b) Registrar los ítems averiados en el módulo Averiados.
+    // Loop propio: NO depende del reintegro de stock ni de si el producto
+    // controla stock (antes estaba dentro del loop de stock y un `continue`
+    // lo salteaba, por eso el averiado no aparecía).
+    const tAV = quoteSchemaTable(schema, "productos_averiados");
+    for (const it of itemsCalc) {
+      if (it.condicion !== "averiado") continue;
+      await client.query(
+        `INSERT INTO ${tAV}
+           (empresa_id, producto_id, cantidad, motivo, estado, descripcion, reportado_por)
+         VALUES ($1::uuid,$2::uuid,$3,'cliente','detectado',$4,$5::uuid)`,
+        [empresaId, it.producto_id, it.cantidad_devuelta,
+         `Devolución ${numero}`, usuario.id]
+      );
     }
 
     // ── 12) Cambios: descuento de stock + movimiento SALIDA.
