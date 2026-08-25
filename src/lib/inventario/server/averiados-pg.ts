@@ -28,6 +28,7 @@ export interface AveriadoRow {
   proveedor_nombre: string | null;
   cantidad: number;
   motivo: string;
+  etiqueta: string | null;
   descripcion: string | null;
   estado: AveriadoEstado;
   recuperado: boolean;
@@ -39,7 +40,7 @@ export interface AveriadoRow {
 const SEL = `
   a.id, a.producto_id, p.nombre AS producto_nombre, p.sku, a.numero_serie,
   a.proveedor_id, pr.nombre AS proveedor_nombre, a.cantidad, a.motivo,
-  a.descripcion, a.estado, a.recuperado, a.fecha_deteccion, a.fecha_resolucion,
+  a.etiqueta, a.descripcion, a.estado, a.recuperado, a.fecha_deteccion, a.fecha_resolucion,
   a.observaciones`;
 
 function joins(schema: string): string {
@@ -74,6 +75,7 @@ export async function listAveriados(
 
 export interface AveriadoInput {
   producto_id: string;
+  etiqueta?: string | null;
   serie_id?: string | null;
   numero_serie?: string | null;
   proveedor_id?: string | null;
@@ -95,12 +97,12 @@ export async function crearAveriado(
   const { rows } = await pool().query<{ id: string }>(
     `INSERT INTO ${t}
        (empresa_id, producto_id, serie_id, numero_serie, proveedor_id, cantidad,
-        motivo, descripcion, observaciones, estado, reportado_por)
-     VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5::uuid,$6,'cliente',$7,$8,'detectado',$9::uuid)
+        motivo, etiqueta, descripcion, observaciones, estado, reportado_por)
+     VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5::uuid,$6,'cliente',$7,$8,$9,'detectado',$10::uuid)
      RETURNING id`,
     [empresaId, input.producto_id, input.serie_id ?? null, input.numero_serie ?? null,
-     input.proveedor_id ?? null, input.cantidad ?? 1, input.descripcion ?? null,
-     input.observaciones ?? null, reportadoPor ?? null]
+     input.proveedor_id ?? null, input.cantidad ?? 1, (input.etiqueta ?? 'Averiado'),
+     input.descripcion ?? null, input.observaciones ?? null, reportadoPor ?? null]
   );
   // Si trae serie, marcar la unidad como averiada (sin sacarla de stock).
   if (input.serie_id) {
@@ -120,7 +122,7 @@ export async function actualizarAveriado(
   schemaRaw: string,
   empresaId: string,
   id: string,
-  patch: Partial<{ estado: AveriadoEstado; observaciones: string | null; recuperado: boolean }>,
+  patch: Partial<{ estado: AveriadoEstado; etiqueta: string | null; observaciones: string | null; recuperado: boolean }>,
   resueltoPor?: string | null
 ): Promise<boolean> {
   const schema = assertAllowedChatDataSchema(schemaRaw);
@@ -136,6 +138,7 @@ export async function actualizarAveriado(
       add("resuelto_por", resueltoPor ?? null, "::uuid");
     }
   }
+  if (patch.etiqueta !== undefined) add("etiqueta", patch.etiqueta);
   if (patch.observaciones !== undefined) add("observaciones", patch.observaciones);
   if (patch.recuperado !== undefined) add("recuperado", patch.recuperado, "::boolean");
   if (sets.length === 0) return false;

@@ -30,9 +30,11 @@ const ESTADO_BADGE: Record<Estado, string> = {
   devuelto_proveedor: "bg-sky-50 text-sky-700 border-sky-200",
 };
 const ESTADOS = Object.keys(ESTADO_LABEL) as Estado[];
+const ETIQUETAS_COMUNES = ["Averiado", "Recuperado", "Exhibición", "Fallado"];
 
 interface Averiado {
   id: string;
+  etiqueta: string | null;
   producto_nombre: string | null;
   sku: string | null;
   numero_serie: string | null;
@@ -60,6 +62,7 @@ export default function AveriadosPage() {
   const [fProducto, setFProducto] = useState("");
   const [fSerie, setFSerie] = useState("");
   const [fDesc, setFDesc] = useState("");
+  const [fEtiqueta, setFEtiqueta] = useState("Averiado");
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -100,11 +103,19 @@ export default function AveriadosPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ producto_id: fProducto, numero_serie: fSerie.trim() || null, descripcion: fDesc.trim() || null }),
+      body: JSON.stringify({ producto_id: fProducto, etiqueta: fEtiqueta.trim() || "Averiado", numero_serie: fSerie.trim() || null, descripcion: fDesc.trim() || null }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j?.success) { setError(j?.error ?? "No se pudo registrar."); return; }
-    setNuevo(false); setFProducto(""); setFSerie(""); setFDesc("");
+    setNuevo(false); setFProducto(""); setFSerie(""); setFDesc(""); setFEtiqueta("Averiado");
+    await reload();
+  }
+
+  async function cambiarEtiqueta(id: string, etiqueta: string) {
+    await fetch("/api/averiados", {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
+      body: JSON.stringify({ id, etiqueta }),
+    });
     await reload();
   }
 
@@ -120,6 +131,7 @@ export default function AveriadosPage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 px-4 pb-10 sm:px-6 lg:px-8">
+      <datalist id="etiquetas-comunes">{ETIQUETAS_COMUNES.map((x) => <option key={x} value={x} />)}</datalist>
       <div className="flex items-start justify-between gap-4">
         <div>
           <Link href="/inventario" className="text-sm text-sky-600 hover:underline">← Inventario</Link>
@@ -139,6 +151,13 @@ export default function AveriadosPage() {
             <div className="sm:col-span-1">
               <label className="mb-1 block text-xs font-medium text-slate-600">Producto *</label>
               <BuscadorProducto productos={productos} value={fProducto} onChange={setFProducto} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Etiqueta</label>
+              <input list="etiquetas-comunes" className={inputClass} value={fEtiqueta} onChange={(e) => setFEtiqueta(e.target.value)} placeholder="Ej: Averiado / Recuperado" />
+              <datalist id="etiquetas-comunes">
+                {ETIQUETAS_COMUNES.map((x) => <option key={x} value={x} />)}
+              </datalist>
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">Nº de serie</label>
@@ -164,6 +183,7 @@ export default function AveriadosPage() {
             <thead>
               <tr className="border-b border-slate-100 text-slate-600">
                 <th className="px-3 py-2 font-semibold">Producto</th>
+                <th className="px-3 py-2 font-semibold">Etiqueta</th>
                 <th className="px-3 py-2 font-semibold">Nº serie</th>
                 <th className="px-3 py-2 font-semibold">Proveedor</th>
                 <th className="px-3 py-2 font-semibold">Motivo / nota</th>
@@ -175,6 +195,14 @@ export default function AveriadosPage() {
               {filas.map((a) => (
                 <tr key={a.id} className="border-b border-slate-50">
                   <td className="px-3 py-2.5 font-medium text-slate-900">{a.producto_nombre ?? "—"}</td>
+                  <td className="px-3 py-2.5">
+                    <input
+                      list="etiquetas-comunes"
+                      defaultValue={a.etiqueta ?? "Averiado"}
+                      onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== a.etiqueta) void cambiarEtiqueta(a.id, v); }}
+                      className="w-32 rounded-md border border-slate-200 px-2 py-1 text-xs outline-none focus:border-[#0EA5E9]"
+                    />
+                  </td>
                   <td className="px-3 py-2.5 font-mono text-xs text-slate-500">{a.numero_serie ?? "—"}</td>
                   <td className="px-3 py-2.5 text-slate-600">{a.proveedor_nombre ?? "—"}</td>
                   <td className="px-3 py-2.5 text-slate-600">{a.descripcion ?? "—"}</td>

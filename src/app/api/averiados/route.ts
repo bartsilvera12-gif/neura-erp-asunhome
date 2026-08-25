@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
     if (!productoId) return NextResponse.json(errorResponse("Falta el producto."), { status: 400 });
     const id = await crearAveriado(c.schema, c.empresaId, {
       producto_id: productoId,
+      etiqueta: (b.etiqueta as string) || null,
       serie_id: (b.serie_id as string) || null,
       numero_serie: (b.numero_serie as string) || null,
       proveedor_id: (b.proveedor_id as string) || null,
@@ -70,6 +71,7 @@ export async function PATCH(request: NextRequest) {
     if (!id) return NextResponse.json(errorResponse("Falta el id."), { status: 400 });
     const ok = await actualizarAveriado(c.schema, c.empresaId, id, {
       estado: b.estado as AveriadoEstado | undefined,
+      etiqueta: b.etiqueta === undefined ? undefined : (b.etiqueta as string | null),
       observaciones: b.observaciones === undefined ? undefined : (b.observaciones as string | null),
       recuperado: b.recuperado === undefined ? undefined : b.recuperado === true,
     }, c.userId);

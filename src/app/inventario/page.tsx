@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { getProductosPaginated } from "@/lib/inventario/storage";
 import type { Producto, MetodoValuacion } from "@/lib/inventario/types";
@@ -178,18 +178,22 @@ export default function InventarioPage() {
 
   // Unidades averiadas por producto: se muestran junto al stock para que el
   // producto devuelto averiado sea visible acá, sin salir del inventario.
-  const [averiadosPorProducto, setAveriadosPorProducto] = useState<Record<string, number>>({});
+  const [averiadosPorProducto, setAveriadosPorProducto] = useState<Record<string, { etiqueta: string; cantidad: number }[]>>({});
   useEffect(() => {
     let cancel = false;
     (async () => {
       try {
         const r = await fetch("/api/averiados?activos=1", { credentials: "include", cache: "no-store" });
         const j = await r.json().catch(() => ({}));
-        const filas = (j?.data?.filas ?? []) as Array<{ producto_id: string; cantidad: number }>;
-        const map: Record<string, number> = {};
+        const filas = (j?.data?.filas ?? []) as Array<{ producto_id: string; cantidad: number; etiqueta: string | null }>;
+        const map: Record<string, { etiqueta: string; cantidad: number }[]> = {};
         for (const a of filas) {
           if (!a.producto_id) continue;
-          map[a.producto_id] = (map[a.producto_id] ?? 0) + Number(a.cantidad || 1);
+          const et = (a.etiqueta ?? "Averiado").trim() || "Averiado";
+          const arr = map[a.producto_id] ?? (map[a.producto_id] = []);
+          const ex = arr.find((x) => x.etiqueta === et);
+          if (ex) ex.cantidad += Number(a.cantidad || 1);
+          else arr.push({ etiqueta: et, cantidad: Number(a.cantidad || 1) });
         }
         if (!cancel) setAveriadosPorProducto(map);
       } catch { /* el badge es informativo, no bloquea */ }
@@ -409,7 +413,9 @@ export default function InventarioPage() {
                   const catNombre = p.categoria_principal_id
                     ? categoriaById.get(p.categoria_principal_id) ?? "—"
                     : "—";
+                  const averiadosDeP = averiadosPorProducto[p.id] ?? [];
                   return (
+                    <Fragment key={`grp-${p.id}`}>
                     <tr
                       key={p.id}
                       className="border-b border-slate-100 transition-colors hover:bg-[#4FAEB2]/5"
@@ -478,14 +484,6 @@ export default function InventarioPage() {
                             </span>
                           </span>
                         )}
-                        {averiadosPorProducto[p.id] > 0 && (
-                          <span
-                            title="Unidades devueltas por el cliente, marcadas como averiadas"
-                            className="mt-1 block text-[10px] font-semibold text-amber-700"
-                          >
-                            {averiadosPorProducto[p.id]} averiado{averiadosPorProducto[p.id] > 1 ? "s" : ""}
-                          </span>
-                        )}
                       </td>
                       <td
                         className={`hidden px-3 py-3.5 text-right tabular-nums font-semibold lg:table-cell ${margenColor(margen)}`}
@@ -524,6 +522,25 @@ export default function InventarioPage() {
                         </div>
                       </td>
                     </tr>
+                    {averiadosDeP.map((av) => (
+                      <tr key={`${p.id}-${av.etiqueta}`} className="bg-amber-50/40 text-amber-800">
+                        <td className="px-5 py-2 text-sm">
+                          <span className="font-medium">{p.nombre}</span>
+                          <span className="mx-1.5 text-amber-400">—</span>
+                          <span className="font-semibold">{av.etiqueta}</span>
+                          <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold">apartado</span>
+                        </td>
+                        <td className="hidden lg:table-cell" />
+                        <td className="hidden md:table-cell" />
+                        <td className="px-3 py-2 text-right tabular-nums text-sm" />
+                        <td className="px-3 py-2 text-right tabular-nums text-sm" />
+                        <td className="px-3 py-2 text-center text-sm font-semibold">{av.cantidad}</td>
+                        <td className="hidden lg:table-cell" />
+                        <td className="hidden lg:table-cell" />
+                        <td />
+                      </tr>
+                    ))}
+                    </Fragment>
                   );
                 })
               )}
