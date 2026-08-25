@@ -250,6 +250,15 @@ export default function PresupuestosPage() {
                             Editar
                           </Link>
                         )}
+                        {r.estado !== "convertido" && r.estado !== "rechazado" && (
+                          <Link
+                            href={`/ventas/nueva?presupuesto_id=${r.id}`}
+                            className="text-sm font-semibold text-[#3F8E91] hover:underline"
+                            title="Pasar a venta en Caja con productos y cliente cargados"
+                          >
+                            Pasar a venta
+                          </Link>
+                        )}
                       </div>
                     </td>
                   </tr>

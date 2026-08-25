@@ -196,12 +196,13 @@ export default function PresupuestoDetallePage() {
               <Pencil className="h-4 w-4" /> Editar
             </Link>
           )}
-          {presu.estado === "aprobado" && (
+          {presu.estado !== "convertido" && presu.estado !== "rechazado" && (
             <Link
               href={`/ventas/nueva?presupuesto_id=${presu.id}`}
               className="inline-flex items-center gap-1.5 rounded-md bg-[#4FAEB2] px-4 py-2 text-sm font-medium text-white hover:bg-[#3F8E91]"
+              title="Abre una venta en Caja con los productos y el cliente ya cargados, lista para cobrar"
             >
-              <FileCheck2 className="h-4 w-4" /> Cobrar en Caja
+              <FileCheck2 className="h-4 w-4" /> Pasar a venta (Caja)
             </Link>
           )}
         </div>
