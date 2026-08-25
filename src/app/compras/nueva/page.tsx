@@ -7,6 +7,7 @@ import MontoInput from "@/components/ui/MontoInput";
 import { saveCompraMulti, uploadComprobante, type CompraItemPayload } from "@/lib/compras/storage";
 import { getProveedores, proveedorExiste, createProveedor } from "@/lib/proveedores/storage";
 import { getProductos, productoExiste, saveProducto } from "@/lib/inventario/storage";
+import { cargarSeries } from "@/lib/inventario/series";
 import type { TipoIva, TipoPago, Moneda } from "@/lib/compras/types";
 import type { Proveedor } from "@/lib/proveedores/types";
 import type { MetodoValuacion, Producto } from "@/lib/inventario/types";
@@ -56,6 +57,8 @@ type LineaCompra = {
   monto_iva: number;
   total: number;
   margen_venta: number | null;
+  maneja_series: boolean;
+  series_texto: string;
 };
 
 // ── SegmentedControl ───────────────────────────────────────────────────────────
@@ -215,6 +218,8 @@ export default function NuevaCompraPage() {
         monto_iva: 0,
         total: 0,
         margen_venta: null,
+        maneja_series: prod.maneja_series === true,
+        series_texto: "",
       }),
     ]);
   }
@@ -290,6 +295,20 @@ export default function NuevaCompraPage() {
       );
       if (!res.success) { setErrorSubmit(res.error); return; }
       if (res.warning) alert(res.warning);
+
+      // Cargar los números de serie de las líneas que los manejan, ligados al
+      // proveedor de esta compra (best-effort: no bloquea el guardado).
+      const dup: string[] = [];
+      for (const l of lineas) {
+        if (!l.maneja_series || !l.series_texto.trim()) continue;
+        const nums = l.series_texto.split(/\r?\n/).map((x) => x.trim()).filter(Boolean)
+          .map((numero_serie) => ({ numero_serie, proveedor_id: String(proveedor.id) }));
+        if (nums.length === 0) continue;
+        const rs = await cargarSeries(l.producto_id, nums);
+        if (rs.ok) dup.push(...rs.data.duplicadas);
+      }
+      if (dup.length > 0) alert(`Compra registrada. Estas series ya existían y se omitieron: ${dup.join(", ")}`);
+
       router.push("/compras");
     } finally {
       setSubmitting(false);
@@ -664,6 +683,18 @@ export default function NuevaCompraPage() {
                           <div className="font-mono text-[11px] text-gray-400">{l.sku}</div>
                           {l.es_insumo_no_vendible && (
                             <span className="mt-0.5 inline-block rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">Materia prima</span>
+                          )}
+                          {l.maneja_series && (
+                            <div className="mt-1.5">
+                              <textarea
+                                value={l.series_texto}
+                                onChange={(e) => editarLinea(i, { series_texto: e.target.value })}
+                                rows={2}
+                                placeholder="Nº de serie, uno por línea"
+                                className="w-full rounded-md border border-slate-200 px-2 py-1 font-mono text-[11px] outline-none focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20"
+                              />
+                              <span className="text-[10px] text-slate-400">Se cargan con este proveedor al guardar.</span>
+                            </div>
                           )}
                         </td>
                         <td className="py-2 px-2">
