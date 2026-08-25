@@ -16,6 +16,25 @@ import {
 } from "@/lib/proveedores/server/proveedores-pg";
 import { normalizeUpperText, normalizeUpperNullable } from "@/lib/text/normalize";
 
+/** Parsea plazos de cuotas desde un array de números o un CSV ("30,60,90,120"). */
+function parsePlazosCuotas(v: unknown): number[] | null {
+  let arr: unknown[] = [];
+  if (Array.isArray(v)) arr = v;
+  else if (typeof v === "string" && v.trim()) arr = v.split(/[,\s]+/);
+  else return null;
+  const nums = arr
+    .map((x) => parseInt(String(x).trim(), 10))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  return nums;
+}
+
+/** Días de gracia: entero ≥ 0 o null. */
+function parseDiasGracia(v: unknown): number | null {
+  if (v == null || String(v).trim() === "") return null;
+  const n = parseInt(String(v), 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 function mapProveedorRow(r: ProveedorRow): Proveedor {
   return {
     id: r.id,
@@ -34,6 +53,10 @@ function mapProveedorRow(r: ProveedorRow): Proveedor {
         ? r.condicion_pago
         : null,
     plazo_pago_dias: r.plazo_pago_dias != null ? Number(r.plazo_pago_dias) : null,
+    dias_gracia: r.dias_gracia != null ? Number(r.dias_gracia) : null,
+    plazos_cuotas: Array.isArray(r.plazos_cuotas)
+      ? r.plazos_cuotas.map((n) => Number(n)).filter((n) => Number.isFinite(n))
+      : null,
     moneda_preferida: r.moneda_preferida === "USD" ? "USD" : r.moneda_preferida === "GS" ? "GS" : null,
     observaciones: r.observaciones ?? null,
     created_at: r.created_at,
@@ -171,6 +194,8 @@ export async function POST(request: NextRequest) {
         estado,
         condicion_pago,
         plazo_pago_dias,
+        dias_gracia: parseDiasGracia(body.dias_gracia),
+        plazos_cuotas: parsePlazosCuotas(body.plazos_cuotas),
         moneda_preferida,
         observaciones,
       });

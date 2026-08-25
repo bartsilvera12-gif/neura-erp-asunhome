@@ -34,6 +34,10 @@ function mapProveedorRow(r: ProveedorRow): Proveedor {
         ? r.condicion_pago
         : null,
     plazo_pago_dias: r.plazo_pago_dias != null ? Number(r.plazo_pago_dias) : null,
+    dias_gracia: r.dias_gracia != null ? Number(r.dias_gracia) : null,
+    plazos_cuotas: Array.isArray(r.plazos_cuotas)
+      ? r.plazos_cuotas.map((n) => Number(n)).filter((n) => Number.isFinite(n))
+      : null,
     moneda_preferida: r.moneda_preferida === "USD" ? "USD" : r.moneda_preferida === "GS" ? "GS" : null,
     observaciones: r.observaciones ?? null,
     created_at: r.created_at,
@@ -114,6 +118,20 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
         body.plazo_pago_dias != null && String(body.plazo_pago_dias).trim() !== ""
           ? parseInt(String(body.plazo_pago_dias), 10) || null
           : null;
+    }
+    if (body.dias_gracia !== undefined) {
+      patch.dias_gracia =
+        body.dias_gracia != null && String(body.dias_gracia).trim() !== ""
+          ? Math.max(0, parseInt(String(body.dias_gracia), 10) || 0)
+          : null;
+    }
+    if (body.plazos_cuotas !== undefined) {
+      let arr: unknown[] = [];
+      if (Array.isArray(body.plazos_cuotas)) arr = body.plazos_cuotas;
+      else if (typeof body.plazos_cuotas === "string" && body.plazos_cuotas.trim()) arr = body.plazos_cuotas.split(/[,\s]+/);
+      patch.plazos_cuotas = arr
+        .map((x) => parseInt(String(x).trim(), 10))
+        .filter((n) => Number.isFinite(n) && n > 0);
     }
     if (body.moneda_preferida !== undefined) {
       patch.moneda_preferida = body.moneda_preferida === "USD" || body.moneda_preferida === "GS"

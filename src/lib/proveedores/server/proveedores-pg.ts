@@ -103,6 +103,8 @@ export interface ProveedorRow {
   estado: string;
   condicion_pago: string | null;
   plazo_pago_dias: number | null;
+  dias_gracia: number | null;
+  plazos_cuotas: number[] | null;
   moneda_preferida: string | null;
   observaciones: string | null;
   created_at: string;
@@ -111,8 +113,8 @@ export interface ProveedorRow {
 
 const PROV_COLS = `
   id, empresa_id, nombre, nombre_comercial, razon_social, ruc, telefono, email,
-  direccion, contacto, estado, condicion_pago, plazo_pago_dias, moneda_preferida,
-  observaciones, created_at, updated_at
+  direccion, contacto, estado, condicion_pago, plazo_pago_dias, dias_gracia, plazos_cuotas,
+  moneda_preferida, observaciones, created_at, updated_at
 `;
 
 export async function listProveedores(
@@ -154,6 +156,10 @@ export interface InsertProveedorInput {
   estado?: "activo" | "inactivo";
   condicion_pago?: "contado" | "credito" | "mixto" | null;
   plazo_pago_dias?: number | null;
+  /** Días de gracia antes del primer vencimiento (cuentas por pagar). */
+  dias_gracia?: number | null;
+  /** Plazos de cuotas en días, contados desde el fin de la gracia (ej. [30,60,90,120]). */
+  plazos_cuotas?: number[] | null;
   moneda_preferida?: "GS" | "USD" | null;
   observaciones?: string | null;
 }
@@ -184,10 +190,10 @@ export async function insertProveedor(
     `INSERT INTO ${t} (
        empresa_id, nombre, nombre_comercial, razon_social, ruc, telefono, email,
        direccion, contacto, estado, condicion_pago, plazo_pago_dias,
-       moneda_preferida, observaciones
+       dias_gracia, plazos_cuotas, moneda_preferida, observaciones
      ) VALUES (
        $1::uuid, $2, $3, $4, $5, $6, $7,
-       $8, $9, $10, $11, $12::integer, $13, $14
+       $8, $9, $10, $11, $12::integer, $13::integer, $14::integer[], $15, $16
      ) RETURNING ${PROV_COLS}`,
     [
       empresaId,
@@ -202,6 +208,8 @@ export async function insertProveedor(
       d.estado ?? "activo",
       d.condicion_pago ?? null,
       d.plazo_pago_dias ?? null,
+      d.dias_gracia ?? null,
+      d.plazos_cuotas ?? null,
       d.moneda_preferida ?? null,
       d.observaciones ?? null,
     ]
@@ -236,6 +244,8 @@ export async function updateProveedor(
   if (d.estado !== undefined) setIf("estado", d.estado);
   if (d.condicion_pago !== undefined) setIf("condicion_pago", d.condicion_pago ?? null);
   if (d.plazo_pago_dias !== undefined) setIf("plazo_pago_dias", d.plazo_pago_dias ?? null, "::integer");
+  if (d.dias_gracia !== undefined) setIf("dias_gracia", d.dias_gracia ?? null, "::integer");
+  if (d.plazos_cuotas !== undefined) setIf("plazos_cuotas", d.plazos_cuotas ?? null, "::integer[]");
   if (d.moneda_preferida !== undefined) setIf("moneda_preferida", d.moneda_preferida ?? null);
   if (d.observaciones !== undefined) setIf("observaciones", d.observaciones ?? null);
   if (sets.length === 0) return await getProveedorById(schemaRaw, empresaId, id);

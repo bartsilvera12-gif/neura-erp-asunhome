@@ -22,6 +22,8 @@ export interface ProveedorFormValues {
   estado: EstadoProveedor;
   condicion_pago: CondicionPagoProveedor | "";
   plazo_pago_dias: string;
+  dias_gracia: string;
+  plazos_cuotas: string;
   moneda_preferida: "" | "GS" | "USD";
   observaciones: string;
   categoria_ids: string[];
@@ -40,6 +42,8 @@ export function emptyProveedorForm(): ProveedorFormValues {
     estado: "activo",
     condicion_pago: "",
     plazo_pago_dias: "",
+    dias_gracia: "",
+    plazos_cuotas: "",
     moneda_preferida: "",
     observaciones: "",
     categoria_ids: [],
@@ -178,6 +182,34 @@ export default function ProveedorForm({
             onChange={(e) => patch("plazo_pago_dias", e.target.value)}
             disabled={disabled}
           />
+        </div>
+        <div>
+          <label className={labelClass}>Días de gracia (crédito)</label>
+          <input
+            type="number"
+            min={0}
+            className={inputClass}
+            placeholder="Ej: 60"
+            value={values.dias_gracia}
+            onChange={(e) => patch("dias_gracia", e.target.value)}
+            disabled={disabled}
+          />
+          <p className="mt-1 text-[11px] text-slate-500">Días antes de que empiecen los vencimientos.</p>
+        </div>
+        <div className="sm:col-span-2">
+          <label className={labelClass}>Plazos de cuotas (días)</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            className={inputClass}
+            placeholder="Ej: 30, 60, 90, 120"
+            value={values.plazos_cuotas}
+            onChange={(e) => patch("plazos_cuotas", e.target.value)}
+            disabled={disabled}
+          />
+          <p className="mt-1 text-[11px] text-slate-500">
+            Separados por coma. Se cuentan desde que termina la gracia. Ej: con 60 de gracia y “30, 60, 90”, la 1ª cuota vence a los 90 días de la factura.
+          </p>
         </div>
         <div>
           <label className={labelClass}>Moneda preferida</label>

@@ -39,6 +39,12 @@ export default function NuevoProveedorPage() {
       condicion_pago: form.condicion_pago === "" ? null : form.condicion_pago,
       plazo_pago_dias:
         form.plazo_pago_dias.trim() === "" ? null : parseInt(form.plazo_pago_dias, 10),
+      dias_gracia:
+        form.dias_gracia.trim() === "" ? null : parseInt(form.dias_gracia, 10),
+      plazos_cuotas: form.plazos_cuotas
+        .split(/[,\s]+/)
+        .map((x) => parseInt(x.trim(), 10))
+        .filter((n) => Number.isFinite(n) && n > 0),
       moneda_preferida: form.moneda_preferida === "" ? null : form.moneda_preferida,
       observaciones: form.observaciones.trim() || null,
       categoria_ids: form.categoria_ids,

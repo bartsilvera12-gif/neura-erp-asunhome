@@ -42,6 +42,8 @@ export default function EditarProveedorPage() {
         estado: p.estado,
         condicion_pago: p.condicion_pago ?? "",
         plazo_pago_dias: p.plazo_pago_dias != null ? String(p.plazo_pago_dias) : "",
+        dias_gracia: p.dias_gracia != null ? String(p.dias_gracia) : "",
+        plazos_cuotas: Array.isArray(p.plazos_cuotas) ? p.plazos_cuotas.join(", ") : "",
         moneda_preferida: p.moneda_preferida ?? "",
         observaciones: p.observaciones ?? "",
         categoria_ids: (p.categorias ?? []).map((c) => c.id),
@@ -74,6 +76,12 @@ export default function EditarProveedorPage() {
       condicion_pago: form.condicion_pago === "" ? null : form.condicion_pago,
       plazo_pago_dias:
         form.plazo_pago_dias.trim() === "" ? null : parseInt(form.plazo_pago_dias, 10),
+      dias_gracia:
+        form.dias_gracia.trim() === "" ? null : parseInt(form.dias_gracia, 10),
+      plazos_cuotas: form.plazos_cuotas
+        .split(/[,\s]+/)
+        .map((x) => parseInt(x.trim(), 10))
+        .filter((n) => Number.isFinite(n) && n > 0),
       moneda_preferida: form.moneda_preferida === "" ? null : form.moneda_preferida,
       observaciones: form.observaciones.trim() || null,
       categoria_ids: form.categoria_ids,

@@ -28,6 +28,10 @@ export interface Proveedor {
   estado: EstadoProveedor;
   condicion_pago: CondicionPagoProveedor | null;
   plazo_pago_dias: number | null;
+  /** Días de gracia antes del primer vencimiento (cuentas por pagar). */
+  dias_gracia: number | null;
+  /** Plazos de cuotas en días desde el fin de la gracia (ej. [30,60,90,120]). */
+  plazos_cuotas: number[] | null;
   moneda_preferida: "GS" | "USD" | null;
   observaciones: string | null;
   created_at: string;
@@ -49,6 +53,8 @@ export type NuevoProveedorInput = {
   estado?: EstadoProveedor;
   condicion_pago?: CondicionPagoProveedor | null;
   plazo_pago_dias?: number | null;
+  dias_gracia?: number | null;
+  plazos_cuotas?: number[] | null;
   moneda_preferida?: "GS" | "USD" | null;
   observaciones?: string | null;
   categoria_ids?: string[];
