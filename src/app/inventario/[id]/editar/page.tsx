@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { cargarSeries, getSeries, type Serie } from "@/lib/inventario/series";
 import { useRouter, useParams } from "next/navigation";
 import MontoInput from "@/components/ui/MontoInput";
 import PresentacionesEditor from "@/components/inventario/PresentacionesEditor";
@@ -64,6 +65,8 @@ export default function EditarProductoPage() {
   const [marcaId, setMarcaId] = useState<string | null>(null);
   const [lineaId, setLineaId] = useState<string | null>(null);
   const [manejaSeries, setManejaSeries] = useState(false);
+  const [seriesExistentes, setSeriesExistentes] = useState<Serie[]>([]);
+  const [nuevasSeries, setNuevasSeries] = useState("");
   const [garantiaMeses, setGarantiaMeses] = useState("");
   const [ubicacionId, setUbicacionId] = useState<string | null>(null);
   const [proveedorId, setProveedorId] = useState<string | null>(null);
@@ -229,6 +232,9 @@ export default function EditarProductoPage() {
       setMarcaId(p.marca_id ?? null);
       setLineaId(p.linea_id ?? null);
       setManejaSeries(p.maneja_series === true);
+      if (p.maneja_series === true) {
+        getSeries({ producto: id }).then((filas) => setSeriesExistentes(filas)).catch(() => {});
+      }
       setGarantiaMeses(p.garantia_meses != null ? String(p.garantia_meses) : "");
       setUbicacionId(p.ubicacion_principal_id ?? null);
       setProveedorId(p.proveedor_principal_id ?? null);
@@ -415,6 +421,16 @@ export default function EditarProductoPage() {
       const actualizado = await updateProducto(id, updatePayload);
       console.log("[inventario/editar] PATCH result:", actualizado ? { id: actualizado.id, nombre: actualizado.nombre } : "null");
       if (actualizado) {
+        if (manejaSeries && nuevasSeries.trim()) {
+          const nums = nuevasSeries.split(/\r?\n/).map((x) => x.trim()).filter(Boolean)
+            .map((numero_serie) => ({ numero_serie, proveedor_id: proveedorId }));
+          if (nums.length > 0) {
+            const rs = await cargarSeries(id, nums);
+            if (rs.ok && rs.data.duplicadas.length > 0) {
+              alert(`Se agregaron ${rs.data.creadas} serie(s). Ya existían: ${rs.data.duplicadas.join(", ")}`);
+            }
+          }
+        }
         router.push("/inventario");
       } else {
         showErr("No se pudo guardar los cambios. Revisá los datos e intentá nuevamente.");
@@ -728,6 +744,36 @@ export default function EditarProductoPage() {
                     </span>
                   </span>
                 </label>
+
+                {manejaSeries && (
+                  <div className="mt-3 border-t border-slate-200 pt-3">
+                    {seriesExistentes.length > 0 && (
+                      <div className="mb-3">
+                        <span className="mb-1 block text-xs font-medium text-slate-600">
+                          Series cargadas ({seriesExistentes.length})
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {seriesExistentes.map((s) => (
+                            <span key={s.id} className="rounded-md border border-slate-200 bg-white px-2 py-0.5 font-mono text-xs text-slate-600">
+                              {s.numero_serie}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <label className={labelClass}>Agregar números de serie</label>
+                    <textarea
+                      value={nuevasSeries}
+                      onChange={(e) => setNuevasSeries(e.target.value)}
+                      rows={3}
+                      placeholder={"Una serie por línea. Ej:\nSN-A1B2C3\nSN-D4E5F6"}
+                      className={`${inputClass} font-mono text-sm`}
+                    />
+                    <p className="mt-1 text-xs text-slate-500">
+                      Las series nuevas se cargan al guardar. Las repetidas se ignoran.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="md:col-span-4 min-w-0">

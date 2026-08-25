@@ -7,6 +7,7 @@
  *  - Cliente: equipo que trae un cliente a reparar.
  */
 import Link from "next/link";
+import BuscadorProducto from "@/components/inventario/BuscadorProducto";
 import { useCallback, useEffect, useState } from "react";
 
 const inputClass =
@@ -190,10 +191,7 @@ export default function TecnicoPage() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Producto *</label>
-                <select className={inputClass} value={productoId} onChange={(e) => setProductoId(e.target.value)}>
-                  <option value="">Elegir…</option>
-                  {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                </select>
+                <BuscadorProducto productos={productos} value={productoId} onChange={setProductoId} />
                 <p className="mt-1 text-xs text-slate-500">Se descuenta 1 del stock al enviarlo al técnico.</p>
               </div>
               <div>

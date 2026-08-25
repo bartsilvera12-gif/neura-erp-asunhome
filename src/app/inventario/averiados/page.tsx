@@ -5,6 +5,7 @@
  * Listado + cambio de estado + carga manual.
  */
 import Link from "next/link";
+import BuscadorProducto from "@/components/inventario/BuscadorProducto";
 import { useCallback, useEffect, useState } from "react";
 
 const inputClass =
@@ -137,10 +138,7 @@ export default function AveriadosPage() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="sm:col-span-1">
               <label className="mb-1 block text-xs font-medium text-slate-600">Producto *</label>
-              <select className={inputClass} value={fProducto} onChange={(e) => setFProducto(e.target.value)}>
-                <option value="">Elegir…</option>
-                {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-              </select>
+              <BuscadorProducto productos={productos} value={fProducto} onChange={setFProducto} />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">Nº de serie</label>
