@@ -38,20 +38,26 @@ export default function LoginPage() {
       return;
     }
 
-    // Redirección por rol: vendedores/asesores/comerciales arrancan en Caja
-    // (no tienen acceso al dashboard). Admin/supervisor/usuario → home.
+    // Landing por acceso: quien NO tiene el módulo 'dashboard' arranca en Caja
+    // (/ventas). Cubre vendedores y el rol 'usuario' con módulos limitados.
+    // Admin/super_admin tienen 'dashboard' → home.
     let target = "/";
     try {
       const res = await fetch("/api/usuarios/me", { cache: "no-store" });
       if (res.ok) {
         const json = await res.json();
         const rol = String(json?.usuario?.rol ?? "").trim().toLowerCase();
-        if (["vendedor", "asesor", "comercial", "asesor comercial"].includes(rol)) {
+        const modulos = Array.isArray(json?.usuario?.modulos)
+          ? (json.usuario.modulos as string[]).map((m) => String(m).trim().toLowerCase())
+          : [];
+        const tieneDashboard = modulos.includes("dashboard");
+        const esVendedor = ["vendedor", "asesor", "comercial", "asesor comercial"].includes(rol);
+        if (esVendedor || (!tieneDashboard && modulos.includes("ventas"))) {
           target = "/ventas";
         }
       }
     } catch {
-      // si falla la resolucion de rol, cae al default "/"
+      // si falla la resolucion, cae al default "/"
     }
     router.push(target);
   }

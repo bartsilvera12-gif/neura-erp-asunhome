@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServiceAuthUsuario } from "@/lib/auth/get-service-auth-usuario";
+import { createServiceRoleClient } from "@/lib/supabase/service-admin";
+import { resolveEffectiveModules } from "@/lib/modulos/resolve-effective-modules";
 
 type UsuarioMeRow = {
   nombre: string | null;
@@ -49,7 +51,24 @@ export async function GET(request: Request) {
     const email = (row?.email ?? authUser.email ?? "").trim() || null;
     const rol = (row?.rol ?? catalogUsuario?.rol ?? "").trim() || null;
 
-    return NextResponse.json({ usuario: { nombre, rol, email } });
+    // Slugs de módulos efectivos: lo usa el login para elegir landing
+    // (quien no tiene 'dashboard' arranca en Caja/Ventas). Best-effort.
+    let modulos: string[] = [];
+    if (catalogUsuario?.id && catalogUsuario?.empresa_id) {
+      try {
+        const catalog = createServiceRoleClient();
+        const mods = await resolveEffectiveModules(catalog, {
+          id: catalogUsuario.id,
+          empresa_id: catalogUsuario.empresa_id,
+          rol: catalogUsuario.rol ?? rol,
+        });
+        modulos = mods.map((m) => (m.slug ?? "").trim().toLowerCase()).filter(Boolean);
+      } catch {
+        modulos = [];
+      }
+    }
+
+    return NextResponse.json({ usuario: { nombre, rol, email, modulos } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Error al obtener el usuario actual";
     return NextResponse.json({ error: message }, { status: 500 });
