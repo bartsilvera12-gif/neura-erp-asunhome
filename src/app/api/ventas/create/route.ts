@@ -283,6 +283,8 @@ export async function POST(request: NextRequest) {
         cajaId: o.caja_id != null && String(o.caja_id).trim() !== "" ? String(o.caja_id) : null,
         usuarioId: auth.usuarioCatalogId ?? null,
         usuarioNombre: auth.nombre ?? auth.user?.email ?? null,
+        vendedorId: o.vendedor_id != null && String(o.vendedor_id).trim() !== "" ? String(o.vendedor_id) : null,
+        vendedorNombre: o.vendedor_nombre != null && String(o.vendedor_nombre).trim() !== "" ? String(o.vendedor_nombre).slice(0, 200) : null,
         emitirFactura,
       });
 

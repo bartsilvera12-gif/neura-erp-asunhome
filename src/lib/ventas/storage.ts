@@ -90,6 +90,9 @@ export async function saveVenta(
     emitir_factura?: boolean;
     /** Retención de IVA: % (0–100) sobre el IVA que descuenta del total. */
     retencion_iva_pct?: number;
+    /** Vendedor acreditado para comisión (puede diferir del cajero). */
+    vendedor_id?: string | null;
+    vendedor_nombre?: string | null;
   },
   pedidoCocina?: PedidoCocinaInput,
   pagoDetalle?: PagoDetalleInput | null,
@@ -129,6 +132,8 @@ export async function saveVenta(
         genera_nota_remision: datos.genera_nota_remision === true,
         emitir_factura: datos.emitir_factura === true,
         retencion_iva_pct: Number(datos.retencion_iva_pct) || 0,
+        vendedor_id: datos.vendedor_id ?? null,
+        vendedor_nombre: datos.vendedor_nombre ?? null,
         pedido_id: opts?.pedidoId ?? null,
         pedido_caja_id: opts?.pedidoCajaId ?? null,
         caja_id: opts?.cajaId ?? null,

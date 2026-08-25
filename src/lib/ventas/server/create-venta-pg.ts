@@ -96,6 +96,9 @@ export interface CreateVentaPgParams {
   /** Usuario que registra la venta (auditoría de movimientos de inventario). */
   usuarioId?: string | null;
   usuarioNombre?: string | null;
+  /** Vendedor acreditado para comisión (puede diferir del cajero). */
+  vendedorId?: string | null;
+  vendedorNombre?: string | null;
   /**
    * Si true, activa el puente Venta → Factura ERP (SIFEN legal): crea una fila
    * `facturas` FAC-XXXXXX, sus `factura_items` y linkea `ventas.factura_id`.
@@ -582,6 +585,8 @@ export async function createVentaTransaccionalPg(
       caja_id: cajaIdActual,
       created_by: params.usuarioId ?? null,
       usuario_nombre: params.usuarioNombre ?? null,
+      vendedor_id: params.vendedorId ?? null,
+      vendedor_nombre: params.vendedorNombre ?? null,
     })
     .select("id")
     .single();

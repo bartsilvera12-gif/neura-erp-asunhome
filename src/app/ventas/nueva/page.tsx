@@ -8,6 +8,7 @@ import ProductPickerModal, { type ProductoPickerItem, type AgregarVentaPayload }
 import { saveVenta, type FaltanteStock } from "@/lib/ventas/storage";
 import { getProductos } from "@/lib/inventario/storage";
 import CrearClienteModal, { type ClienteCreado } from "@/components/clientes/CrearClienteModal";
+import { FancySelect } from "@/components/ui/FancySelect";
 import { generarYAbrirRecibo } from "@/lib/recibos/client";
 import type { TipoIvaVenta, TipoVenta, MonedaVenta, LineaVenta, MetodoPago, TipoPrecioVenta } from "@/lib/ventas/types";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
@@ -193,6 +194,10 @@ export default function NuevaVentaPage() {
   type ClienteLite = { id: string; label: string; ruc: string | null; telefono: string | null; usa_nota_remision: boolean };
   const [clientes, setClientes] = useState<ClienteLite[]>([]);
   const [clienteId, setClienteId] = useState("");
+  // Vendedor acreditado para comisión (default: usuario logueado si es vendedor).
+  type VendedorLite = { id: string; nombre: string; email: string; porcentaje_comision: number };
+  const [vendedores, setVendedores] = useState<VendedorLite[]>([]);
+  const [vendedorId, setVendedorId] = useState("");
   const [clienteQuery, setClienteQuery] = useState("");
   const [clienteOpen, setClienteOpen] = useState(false);
   const clienteContainerRef = useRef<HTMLDivElement>(null);
@@ -584,6 +589,33 @@ export default function NuevaVentaPage() {
     return () => { cancelled = true; };
   }, []);
 
+  // Cargar vendedores + preseleccionar al usuario logueado si es vendedor.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [rv, rm] = await Promise.all([
+          fetch("/api/comisiones/vendedores", { credentials: "include", cache: "no-store" }),
+          fetch("/api/usuarios/me", { cache: "no-store" }),
+        ]);
+        const jv = await rv.json();
+        const lista: VendedorLite[] = rv.ok && jv?.success && Array.isArray(jv.data?.vendedores)
+          ? (jv.data.vendedores as VendedorLite[])
+          : [];
+        if (cancelled) return;
+        setVendedores(lista);
+        // Default: el usuario logueado si figura como vendedor.
+        try {
+          const jm = await rm.json();
+          const miEmail = String(jm?.usuario?.email ?? "").trim().toLowerCase();
+          const yo = lista.find((v) => v.email.toLowerCase() === miEmail);
+          if (yo && !cancelled) setVendedorId(yo.id);
+        } catch { /* sin default */ }
+      } catch { /* comisiones opcional: no bloquea la venta */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // UX rápida: al entrar, enfocar el autocompletar para empezar a cargar de una
   // (sin abrir modales). El "Buscador avanzado" (picker) queda a un clic.
   useEffect(() => {
@@ -933,6 +965,8 @@ export default function NuevaVentaPage() {
           plazo_dias:   tipoVenta === "CREDITO" ? plazoDiasNum : undefined,
           metodo_pago:  pagoMixto ? "efectivo" : metodoPago, // el backend lo marca 'mixto' si aplica
           cliente_id:   clienteIdFinal || null,
+          vendedor_id:  vendedorId || null,
+          vendedor_nombre: vendedores.find((v) => v.id === vendedorId)?.nombre ?? null,
           retencion_iva_pct: retencionPctNum,
           genera_nota_remision: !!clienteIdFinal && generaNotaRemision,
           // Puente venta→factura: solo cuando la empresa está en modo 'sifen' y el
@@ -1198,6 +1232,23 @@ export default function NuevaVentaPage() {
                 </div>
               )}
             </div>
+
+            {/* Vendedor acreditado para comisión (solo si hay vendedores cargados). */}
+            {vendedores.length > 0 && (
+              <div>
+                <label className={labelClass}>Vendedor</label>
+                <FancySelect
+                  value={vendedorId}
+                  onChange={(v) => setVendedorId(v)}
+                  options={[
+                    { value: "", label: "— Sin vendedor —" },
+                    ...vendedores.map((v) => ({ value: v.id, label: v.nombre })),
+                  ]}
+                  placeholder="Elegir vendedor…"
+                />
+                <p className="mt-1 text-[11px] text-slate-500">Se usa para calcular su comisión en el reporte mensual.</p>
+              </div>
+            )}
 
             {/* Documento a emitir (solo cuando la empresa está en modo SIFEN):
                 Factura electrónica (puente a SIFEN) vs Solo ticket. */}
