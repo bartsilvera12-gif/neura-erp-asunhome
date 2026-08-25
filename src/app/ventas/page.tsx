@@ -95,6 +95,7 @@ export default function VentasPage() {
   const [mostrarAnuladas, setMostrarAnuladas] = useState(true);
   const [detalle,    setDetalle]    = useState<Venta | null>(null);
   const [anularTarget, setAnularTarget] = useState<Venta | null>(null);
+  const [editarTarget, setEditarTarget] = useState<Venta | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [devolucionesOn, setDevolucionesOn] = useState(false);
   const [devolverVentaId, setDevolverVentaId] = useState<string | null>(null);
@@ -407,6 +408,16 @@ export default function VentasPage() {
                           {!isAnulada && (
                             <button
                               type="button"
+                              onClick={() => setEditarTarget(v)}
+                              className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50 transition-colors"
+                              title="Editar datos de la venta (cliente y observaciones). No cambia productos ni montos."
+                            >
+                              Editar
+                            </button>
+                          )}
+                          {!isAnulada && (
+                            <button
+                              type="button"
                               onClick={() => setAnularTarget(v)}
                               className="inline-flex items-center justify-center rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 transition-colors"
                               title={
@@ -452,6 +463,16 @@ export default function VentasPage() {
           onClose={() => setAnularTarget(null)}
           onDone={() => {
             setAnularTarget(null);
+            setReloadKey((k) => k + 1);
+          }}
+        />
+      )}
+      {editarTarget && (
+        <EditarVentaModal
+          venta={editarTarget}
+          onClose={() => setEditarTarget(null)}
+          onDone={() => {
+            setEditarTarget(null);
             setReloadKey((k) => k + 1);
           }}
         />
@@ -544,6 +565,140 @@ function AnularVentaModal({
               className="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-50"
             >
               {loading ? "Anulando..." : "Anular venta"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Modal de edición de datos de venta ──────────────────────────────────────────
+// Edita SOLO cliente y observaciones. Nunca ítems, cantidades, montos ni método de
+// pago (eso afectaría stock y caja). Coincide con el endpoint PATCH /api/ventas/[id].
+
+function EditarVentaModal({
+  venta,
+  onClose,
+  onDone,
+}: {
+  venta: Venta;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [clientes, setClientes] = useState<{ id: string; nombre: string }[]>([]);
+  const [clienteId, setClienteId] = useState<string>(venta.cliente_id ?? "");
+  const [observaciones, setObservaciones] = useState<string>(venta.observaciones ?? "");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const { getClientes, clienteNombre } = await import("@/lib/clientes/storage");
+        const cs = await getClientes();
+        if (!vivo) return;
+        setClientes(cs.map((c) => ({ id: c.id, nombre: clienteNombre(c) })));
+      } catch {
+        /* si falla, el selector queda con solo el cliente actual */
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, []);
+
+  async function submit() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/ventas/${venta.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cliente_id: clienteId || null,
+          observaciones: observaciones.trim() || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error ?? `Error ${res.status}`);
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo editar la venta.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const opciones = [
+    { value: "", label: "— Sin cliente —" },
+    ...clientes.map((c) => ({ value: c.id, label: c.nombre })),
+  ];
+  // Si el cliente actual no vino en el listado (raro), lo agrego para no perderlo.
+  if (venta.cliente_id && !clientes.some((c) => c.id === venta.cliente_id)) {
+    opciones.push({ value: venta.cliente_id, label: venta.cliente_nombre ?? "Cliente actual" });
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-2xl border-2 border-[#4FAEB2]/20 bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-slate-100 bg-gradient-to-r from-[#4FAEB2]/5 to-transparent px-5 py-4">
+          <h3 className="text-base font-bold text-slate-800">Editar venta {venta.numero_control}</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Solo cambia el cliente y las observaciones. No modifica productos, cantidades ni montos.
+          </p>
+        </div>
+        <div className="p-5 space-y-4">
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">Cliente</span>
+            <div className="mt-1">
+              <FancySelect
+                value={clienteId}
+                onChange={(v) => setClienteId(v)}
+                options={opciones}
+                placeholder="Buscar cliente…"
+              />
+            </div>
+          </label>
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">Observaciones</span>
+            <textarea
+              value={observaciones}
+              onChange={(e) => setObservaciones(e.target.value)}
+              placeholder="Datos de facturación, nota interna, etc."
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20 outline-none"
+              rows={3}
+              disabled={loading}
+            />
+          </label>
+          {error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {error}
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={submit}
+              disabled={loading}
+              className="rounded-lg bg-[#4FAEB2] px-4 py-2 text-sm font-bold text-white hover:bg-[#3F8E91] disabled:opacity-50"
+            >
+              {loading ? "Guardando..." : "Guardar cambios"}
             </button>
           </div>
         </div>

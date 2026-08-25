@@ -65,6 +65,9 @@ export interface Venta {
   /** Nombre del usuario que registró la venta (auditoría). */
   usuario_nombre?: string | null;
 
+  /** Observaciones libres de la venta (editables sin tocar ítems ni montos). */
+  observaciones?: string | null;
+
   /** Cliente asociado a la venta (opcional; una venta puede no tener cliente). */
   cliente_id?: string | null;
   /** Nombre del cliente (razón social / contacto) para mostrar y filtrar en el listado. */
