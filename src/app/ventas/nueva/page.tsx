@@ -214,6 +214,8 @@ export default function NuevaVentaPage() {
   // ── Cobro (solo CONTADO, no se persiste — solo ayuda al cajero) ───────────
   const [montoRecibido, setMontoRecibido] = useState("");
   const [metodoPago, setMetodoPago] = useState<MetodoPago>("efectivo");
+  // Retención de IVA (cliente agente de retención): % sobre el IVA que descuenta del total.
+  const [retencionPct, setRetencionPct] = useState("");
 
   // ── Pago mixto (contado con varios metodos) ───────────────────────────────
   type PagoMixtoLinea = {
@@ -401,6 +403,10 @@ export default function NuevaVentaPage() {
             };
           });
         if (!cancelled && lineas.length) setItems(lineas);
+        // Arrastrar la retención de IVA cargada en el presupuesto a la venta.
+        if (!cancelled && Number(presu.retencion_iva_pct) > 0) {
+          setRetencionPct(String(Number(presu.retencion_iva_pct)));
+        }
         if (!cancelled && presu.cliente_id) setClienteId(String(presu.cliente_id));
         // Nombre del cliente en el input (aunque el id no venga en la primer pagina de /api/clientes,
         // o aunque el presupuesto se haya guardado con nombre libre sin id).
@@ -712,6 +718,15 @@ export default function NuevaVentaPage() {
   const totalIva      = items.reduce((s, i) => s + i.monto_iva, 0);
   const totalGeneral  = items.reduce((s, i) => s + i.total_linea, 0);
 
+  // Retención de IVA: el % (0–100) se aplica sobre el IVA y descuenta del total.
+  const retencionPctNum = Math.max(0, Math.min(100, parseFloat(retencionPct) || 0));
+  const retencionMonto  = Math.min(
+    Math.round(totalIva),
+    Math.max(0, Math.round((totalIva * retencionPctNum) / 100))
+  );
+  // Neto a cobrar = lo que realmente paga el cliente / entra a caja.
+  const totalACobrar = Math.max(0, Math.round(totalGeneral) - retencionMonto);
+
   // Condición de venta: si es Crédito, exigir plazo de al menos 1 día y un cliente.
   const plazoDiasNum = parseInt(plazoDias) || 0;
   const creditoValido = tipoVenta === "CONTADO" || (plazoDiasNum >= 1 && !!clienteId);
@@ -719,7 +734,7 @@ export default function NuevaVentaPage() {
   const pagoMixtoValido =
     !pagoMixto ||
     tipoVenta !== "CONTADO" ||
-    Math.abs(pagosMixto.reduce((s, p) => s + (Number(p.monto) || 0), 0) - totalGeneral) < 1;
+    Math.abs(pagosMixto.reduce((s, p) => s + (Number(p.monto) || 0), 0) - totalACobrar) < 1;
   const ventaValida   = items.length > 0 && creditoValido && pagoMixtoValido;
 
   // Cliente (opcional) — selección + filtrado del buscador.
@@ -738,7 +753,7 @@ export default function NuevaVentaPage() {
 
   // Vuelto (solo informativo, no se persiste)
   const montoRecibidoNum = parseFloat(montoRecibido) || 0;
-  const vuelto           = montoRecibidoNum - totalGeneral;
+  const vuelto           = montoRecibidoNum - totalACobrar;
 
   // ── Productos filtrados para el combobox ──────────────────────────────────
   // Solo vendibles (Reventa + Menú). Excluye materia prima / insumos.
@@ -918,6 +933,7 @@ export default function NuevaVentaPage() {
           plazo_dias:   tipoVenta === "CREDITO" ? plazoDiasNum : undefined,
           metodo_pago:  pagoMixto ? "efectivo" : metodoPago, // el backend lo marca 'mixto' si aplica
           cliente_id:   clienteIdFinal || null,
+          retencion_iva_pct: retencionPctNum,
           genera_nota_remision: !!clienteIdFinal && generaNotaRemision,
           // Puente venta→factura: solo cuando la empresa está en modo 'sifen' y el
           // cajero eligió "Factura". El backend valida el modo de nuevo.
@@ -1550,9 +1566,35 @@ export default function NuevaVentaPage() {
                         {totalIva > 0 ? formatGs(totalIva) : "—"}
                       </span>
                     </div>
+                    {/* Retención de IVA (cliente agente de retención): % sobre el IVA
+                        que descuenta del total. Deshabilitado si no hay IVA. */}
+                    <div className="flex items-center justify-between gap-2 text-sm text-gray-600">
+                      <label htmlFor="retencion-iva" className="flex items-center gap-1.5">
+                        Retención IVA
+                        <span className="relative inline-flex items-center">
+                          <input
+                            id="retencion-iva"
+                            type="number"
+                            min={0}
+                            max={100}
+                            step="1"
+                            inputMode="decimal"
+                            value={retencionPct}
+                            onChange={(e) => setRetencionPct(e.target.value)}
+                            disabled={totalIva <= 0}
+                            placeholder="0"
+                            className="w-16 rounded-md border border-slate-300 py-1 pl-2 pr-5 text-right text-sm tabular-nums focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20 outline-none disabled:bg-slate-100 disabled:text-slate-400"
+                          />
+                          <span className="pointer-events-none absolute right-1.5 text-xs text-slate-400">%</span>
+                        </span>
+                      </label>
+                      <span className="tabular-nums font-medium text-amber-700">
+                        {retencionMonto > 0 ? `− ${formatGs(retencionMonto)}` : "—"}
+                      </span>
+                    </div>
                     <div className="flex justify-between text-base font-bold text-gray-900 pt-2 border-t border-gray-200">
-                      <span>TOTAL</span>
-                      <span className="tabular-nums">{formatGs(totalGeneral)}</span>
+                      <span>{retencionMonto > 0 ? "TOTAL A COBRAR" : "TOTAL"}</span>
+                      <span className="tabular-nums">{formatGs(totalACobrar)}</span>
                     </div>
                   </div>
 
@@ -1571,11 +1613,12 @@ export default function NuevaVentaPage() {
                         </label>
                       </div>
 
+                      {/* Pago mixto reconcilia contra el NETO a cobrar (con retención). */}
                       {pagoMixto && (
                         <PagosMixtoEditor
                           pagos={pagosMixto}
                           onChange={setPagosMixto}
-                          total={totalGeneral}
+                          total={totalACobrar}
                           entidades={entidades}
                           formatGs={formatGs}
                         />

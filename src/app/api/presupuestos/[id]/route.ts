@@ -7,6 +7,7 @@ import { ESTADOS_PRESUPUESTO, type EstadoPresupuesto } from "@/lib/presupuestos/
 const PRESU_COLS =
   "id, cliente_id, cliente_nombre, cliente_ruc, cliente_telefono, cliente_direccion, " +
   "numero_control, estado, moneda, subtotal, monto_iva, descuento_total, total, validez_dias, " +
+  "retencion_iva_pct, retencion_iva_monto, " +
   "fecha, fecha_vencimiento, forma_pago, plazo_entrega, observaciones, " +
   "convertido_pedido_id, convertido_venta_id, created_at, updated_at";
 
@@ -140,6 +141,14 @@ export async function PATCH(request: NextRequest, ctxParams: { params: Promise<{
         ? null
         : Math.max(0, parseInt(String(validezRaw), 10) || 0) || null;
 
+      // Retención de IVA: % sobre el IVA que descuenta del total (total guardado = neto).
+      const retPct = Math.max(0, Math.min(100, Number(body.retencion_iva_pct) || 0));
+      const retMonto = Math.min(
+        Math.round(monto_iva),
+        Math.max(0, Math.round((monto_iva * retPct) / 100))
+      );
+      const totalNeto = Math.max(0, Math.round(total) - retMonto);
+
       const updHead = await ctx.supabase.from("presupuestos").update({
         cliente_id: body.cliente_id ? String(body.cliente_id) : null,
         cliente_nombre: clienteNombre,
@@ -150,7 +159,9 @@ export async function PATCH(request: NextRequest, ctxParams: { params: Promise<{
         subtotal: Math.round(subtotal),
         monto_iva: Math.round(monto_iva),
         descuento_total: Math.round(descuento_total),
-        total: Math.round(total),
+        total: totalNeto,
+        retencion_iva_pct: retPct,
+        retencion_iva_monto: retMonto,
         validez_dias: validez,
         forma_pago: body.forma_pago ? String(body.forma_pago) : null,
         plazo_entrega: body.plazo_entrega ? String(body.plazo_entrega) : null,

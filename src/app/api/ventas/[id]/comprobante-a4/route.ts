@@ -112,7 +112,7 @@ export async function GET(
     // 1) Venta
     const { data: venta } = await sb
       .from("ventas")
-      .select("id, numero_control, fecha, subtotal, monto_iva, total, tipo_venta, plazo_dias, metodo_pago, cliente_id, nota_remision_numero, genera_nota_remision, observaciones, estado")
+      .select("id, numero_control, fecha, subtotal, monto_iva, total, retencion_iva_pct, retencion_iva_monto, tipo_venta, plazo_dias, metodo_pago, cliente_id, nota_remision_numero, genera_nota_remision, observaciones, estado")
       .eq("id", ventaId)
       .eq("empresa_id", empresaId)
       .maybeSingle();
@@ -194,6 +194,10 @@ export async function GET(
     const ivaTotal = iva5Liq + iva10Liq;
 
     const v = venta as Record<string, unknown>;
+    // Retención de IVA (agente de retención): descuenta del total → neto a cobrar.
+    const retPct = Number(v.retencion_iva_pct) || 0;
+    const retMonto = Number(v.retencion_iva_monto) || 0;
+    const netoACobrar = Math.max(0, total - retMonto);
     const numeroControl = String(v.numero_control ?? "");
     const notaRem = v.genera_nota_remision === true && v.nota_remision_numero
       ? String(v.nota_remision_numero)
@@ -415,7 +419,7 @@ export async function GET(
     </table>
 
     <div class="pie">
-      <div class="linea"><span class="lbl">SON GUARANIES:</span> <span class="val">${escapeHtml(numeroALetras(total))}</span></div>
+      <div class="linea"><span class="lbl">SON GUARANIES:</span> <span class="val">${escapeHtml(numeroALetras(retMonto > 0 ? netoACobrar : total))}</span></div>
       <div class="linea">
         <span class="lbl">LIQUIDACION DEL IVA</span>
         <span class="val">&nbsp;&nbsp;(5%): ${fmtGs(iva5Liq)}&nbsp;&nbsp;&nbsp;&nbsp;(10%): ${fmtGs(iva10Liq)}&nbsp;&nbsp;&nbsp;&nbsp;TOTAL IVA: ${fmtGs(ivaTotal)}</span>
@@ -442,7 +446,11 @@ export async function GET(
                 .join("")}`
           : ""
       }
-      <div class="total-final">TOTAL: Gs. ${fmtGs(total)}</div>
+      ${retMonto > 0
+        ? `<div class="linea"><span class="lbl">TOTAL:</span> <span class="val">Gs. ${fmtGs(total)}</span></div>
+      <div class="linea"><span class="lbl">RETENCION IVA${retPct ? ` (${retPct}%)` : ""}:</span> <span class="val">- Gs. ${fmtGs(retMonto)}</span></div>
+      <div class="total-final">NETO A COBRAR: Gs. ${fmtGs(netoACobrar)}</div>`
+        : `<div class="total-final">TOTAL: Gs. ${fmtGs(total)}</div>`}
     </div>
     <div class="corte"><span>✂ CORTAR AQUÍ ✂</span></div>
   </div>

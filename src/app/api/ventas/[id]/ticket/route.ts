@@ -144,6 +144,8 @@ interface VentaRow {
   subtotal: number | string;
   monto_iva: number | string;
   total: number | string;
+  retencion_iva_pct: number | string | null;
+  retencion_iva_monto: number | string | null;
   observaciones: string | null;
   metodo_pago: string | null;
   cliente_id: string | null;
@@ -252,6 +254,8 @@ function renderCopia(opts: {
   const subtotal = Number(venta.subtotal);
   const ivaTotal = Number(venta.monto_iva);
   const total = Number(venta.total);
+  const retPct = Number(venta.retencion_iva_pct) || 0;
+  const retMonto = Number(venta.retencion_iva_monto) || 0;
 
   const datosPedido: string[] = [];
   if (modalidad) {
@@ -273,7 +277,8 @@ function renderCopia(opts: {
          <tbody>
            <tr><td class="lbl">Subtotal</td><td class="val">${formatGs(subtotal)}</td></tr>
            ${ivaTotal > 0 ? `<tr><td class="lbl">IVA</td><td class="val">${formatGs(ivaTotal)}</td></tr>` : ""}
-           <tr class="total-row"><td class="lbl">TOTAL</td><td class="val">${formatGs(total)}</td></tr>
+           ${retMonto > 0 ? `<tr><td class="lbl">Retención IVA${retPct ? ` (${retPct}%)` : ""}</td><td class="val">- ${formatGs(retMonto)}</td></tr>` : ""}
+           <tr class="total-row"><td class="lbl">TOTAL${retMonto > 0 ? " A COBRAR" : ""}</td><td class="val">${formatGs(total)}</td></tr>
            <tr><td class="lbl">Pago</td><td class="val">${metodoPagoLabel(venta.metodo_pago)}</td></tr>
            ${desglosePagosHtml(pagos)}
          </tbody>
@@ -434,7 +439,7 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
   // Venta
   const vQ = await ctx.supabase
     .from("ventas")
-    .select("id, numero_control, fecha, subtotal, monto_iva, total, observaciones, metodo_pago, cliente_id, genera_nota_remision, nota_remision_numero")
+    .select("id, numero_control, fecha, subtotal, monto_iva, total, retencion_iva_pct, retencion_iva_monto, observaciones, metodo_pago, cliente_id, genera_nota_remision, nota_remision_numero")
     .eq("id", id)
     .eq("empresa_id", empresaId)
     .maybeSingle();

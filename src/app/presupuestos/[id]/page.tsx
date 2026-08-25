@@ -19,6 +19,8 @@ type Presu = {
   subtotal: number | string;
   monto_iva: number | string;
   descuento_total: number | string;
+  retencion_iva_pct: number | string | null;
+  retencion_iva_monto: number | string | null;
   total: number | string;
   validez_dias: number | null;
   fecha: string;
@@ -288,7 +290,8 @@ export default function PresupuestoDetallePage() {
             <div className="flex justify-between"><span className="text-gray-500">Subtotal (sin IVA)</span><span className="tabular-nums">{fmtGs(presu.subtotal, presu.moneda)}</span></div>
             <div className="flex justify-between"><span className="text-gray-500">IVA</span><span className="tabular-nums">{fmtGs(presu.monto_iva, presu.moneda)}</span></div>
             {Number(presu.descuento_total) > 0 && <div className="flex justify-between"><span className="text-gray-500">Descuentos</span><span className="tabular-nums">- {fmtGs(presu.descuento_total, presu.moneda)}</span></div>}
-            <div className="flex justify-between border-t border-slate-200 pt-1 font-semibold text-base"><span>Total</span><span className="tabular-nums text-[#4FAEB2]">{fmtGs(presu.total, presu.moneda)}</span></div>
+            {Number(presu.retencion_iva_monto) > 0 && <div className="flex justify-between"><span className="text-gray-500">Retención IVA{Number(presu.retencion_iva_pct) ? ` (${Number(presu.retencion_iva_pct)}%)` : ""}</span><span className="tabular-nums text-amber-700">- {fmtGs(presu.retencion_iva_monto ?? 0, presu.moneda)}</span></div>}
+            <div className="flex justify-between border-t border-slate-200 pt-1 font-semibold text-base"><span>{Number(presu.retencion_iva_monto) > 0 ? "Total a cobrar" : "Total"}</span><span className="tabular-nums text-[#4FAEB2]">{fmtGs(presu.total, presu.moneda)}</span></div>
           </div>
         </div>
       </div>

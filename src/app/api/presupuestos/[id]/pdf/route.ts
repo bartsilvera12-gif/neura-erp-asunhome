@@ -212,7 +212,8 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
       <tr><td>Subtotal (sin IVA)</td><td>${fmtMoneda(p.subtotal, moneda)}</td></tr>
       <tr><td>IVA</td><td>${fmtMoneda(p.monto_iva, moneda)}</td></tr>
       ${Number(p.descuento_total) > 0 ? `<tr><td>Descuentos</td><td>- ${fmtMoneda(p.descuento_total, moneda)}</td></tr>` : ""}
-      <tr class="total-row"><td>TOTAL</td><td>${fmtMoneda(p.total, moneda)}</td></tr>
+      ${Number(p.retencion_iva_monto) > 0 ? `<tr><td>Retención IVA${Number(p.retencion_iva_pct) ? ` (${Number(p.retencion_iva_pct)}%)` : ""}</td><td>- ${fmtMoneda(p.retencion_iva_monto, moneda)}</td></tr>` : ""}
+      <tr class="total-row"><td>${Number(p.retencion_iva_monto) > 0 ? "TOTAL A COBRAR" : "TOTAL"}</td><td>${fmtMoneda(p.total, moneda)}</td></tr>
     </table>
 
     ${condiciones.length ? `<div class="cond"><h3>Condiciones comerciales</h3><ul>${condiciones.map((c) => `<li>${c}</li>`).join("")}</ul></div>` : ""}

@@ -143,6 +143,7 @@ export async function POST(request: NextRequest) {
       forma_pago: body.forma_pago ? String(body.forma_pago) : null,
       plazo_entrega: body.plazo_entrega ? String(body.plazo_entrega) : null,
       observaciones: body.observaciones ? String(body.observaciones).slice(0, 4000) : null,
+      retencion_iva_pct: Number(body.retencion_iva_pct) || 0,
       items,
     });
 

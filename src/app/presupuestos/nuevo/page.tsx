@@ -72,6 +72,8 @@ export default function NuevoPresupuestoPage() {
   const [formaPago, setFormaPago] = useState("");
   const [plazoEntrega, setPlazoEntrega] = useState("");
   const [observaciones, setObservaciones] = useState("");
+  // Retención de IVA (cliente agente de retención): % sobre el IVA que descuenta del total.
+  const [retencionPct, setRetencionPct] = useState("");
 
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -181,8 +183,18 @@ export default function NuevoPresupuestoPage() {
       total += t.total;
       desc += Number(it.descuento) || 0;
     }
-    return { subtotal: round2(subtotal), iva: round2(iva), desc: round2(desc), total: round2(total) };
-  }, [items]);
+    const retPct = Math.max(0, Math.min(100, parseFloat(retencionPct) || 0));
+    const retMonto = Math.min(round2(iva), Math.max(0, round2((iva * retPct) / 100)));
+    const neto = Math.max(0, round2(total) - retMonto);
+    return {
+      subtotal: round2(subtotal),
+      iva: round2(iva),
+      desc: round2(desc),
+      total: round2(total),
+      retMonto,
+      neto,
+    };
+  }, [items, retencionPct]);
 
   const valido =
     clienteNombre.trim().length > 0 &&
@@ -208,6 +220,7 @@ export default function NuevoPresupuestoPage() {
           forma_pago: formaPago.trim() || null,
           plazo_entrega: plazoEntrega.trim() || null,
           observaciones: observaciones.trim() || null,
+          retencion_iva_pct: Math.max(0, Math.min(100, parseFloat(retencionPct) || 0)),
           items: items.map((it) => ({
             producto_id: it.producto_id,
             producto_nombre: it.producto_nombre.trim(),
@@ -365,7 +378,29 @@ export default function NuevoPresupuestoPage() {
             <div className="flex justify-between"><span className="text-gray-500">Subtotal (sin IVA)</span><span className="tabular-nums">{fmtGs(totales.subtotal)}</span></div>
             <div className="flex justify-between"><span className="text-gray-500">IVA</span><span className="tabular-nums">{fmtGs(totales.iva)}</span></div>
             {totales.desc > 0 && <div className="flex justify-between"><span className="text-gray-500">Descuentos</span><span className="tabular-nums">- {fmtGs(totales.desc)}</span></div>}
-            <div className="flex justify-between border-t border-slate-200 pt-1 font-semibold text-base"><span>Total</span><span className="tabular-nums text-[#4FAEB2]">{fmtGs(totales.total)}</span></div>
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="retencion-iva-presu" className="flex items-center gap-1.5 text-gray-500">
+                Retención IVA
+                <span className="relative inline-flex items-center">
+                  <input
+                    id="retencion-iva-presu"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="1"
+                    inputMode="decimal"
+                    value={retencionPct}
+                    onChange={(e) => setRetencionPct(e.target.value)}
+                    disabled={totales.iva <= 0}
+                    placeholder="0"
+                    className="w-16 rounded-md border border-slate-300 py-1 pl-2 pr-5 text-right tabular-nums focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20 outline-none disabled:bg-slate-100 disabled:text-slate-400"
+                  />
+                  <span className="pointer-events-none absolute right-1.5 text-xs text-slate-400">%</span>
+                </span>
+              </label>
+              <span className="tabular-nums text-amber-700">{totales.retMonto > 0 ? `- ${fmtGs(totales.retMonto)}` : "—"}</span>
+            </div>
+            <div className="flex justify-between border-t border-slate-200 pt-1 font-semibold text-base"><span>{totales.retMonto > 0 ? "Total a cobrar" : "Total"}</span><span className="tabular-nums text-[#4FAEB2]">{fmtGs(totales.neto)}</span></div>
           </div>
         )}
       </div>

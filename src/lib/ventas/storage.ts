@@ -88,6 +88,8 @@ export async function saveVenta(
     /** Si true, el cajero eligió "Factura": activa el puente venta→factura ERP
      *  (la emisión real solo ocurre si la empresa está en modo 'sifen'). Default false. */
     emitir_factura?: boolean;
+    /** Retención de IVA: % (0–100) sobre el IVA que descuenta del total. */
+    retencion_iva_pct?: number;
   },
   pedidoCocina?: PedidoCocinaInput,
   pagoDetalle?: PagoDetalleInput | null,
@@ -126,6 +128,7 @@ export async function saveVenta(
         permitir_sin_stock: opts?.permitirSinStock === true,
         genera_nota_remision: datos.genera_nota_remision === true,
         emitir_factura: datos.emitir_factura === true,
+        retencion_iva_pct: Number(datos.retencion_iva_pct) || 0,
         pedido_id: opts?.pedidoId ?? null,
         pedido_caja_id: opts?.pedidoCajaId ?? null,
         caja_id: opts?.cajaId ?? null,

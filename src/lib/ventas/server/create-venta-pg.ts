@@ -82,6 +82,10 @@ export interface CreateVentaPgParams {
   subtotalDeclarado: number;
   montoIvaDeclarado: number;
   totalDeclarado: number;
+  /** Retención de IVA (agente de retención). % aplicado sobre el IVA (0–100). */
+  retencionIvaPct?: number;
+  /** Monto retenido en guaraníes = round(monto_iva * pct/100). Descuenta del total. */
+  retencionIvaMonto?: number;
   pedidoCocina?: CreateVentaPedidoCocinaInput | null;
   /** Si true, autoriza vender aunque falte stock de productos o insumos (stock puede quedar negativo). */
   permitirSinStock?: boolean;
@@ -542,6 +546,17 @@ export async function createVentaTransaccionalPg(
     throw new Error("Hay varias cajas abiertas: seleccioná la caja para registrar la venta.");
   }
 
+  // Retención de IVA: el % se aplica sobre el IVA y DESCUENTA del total.
+  // El total guardado es el NETO a cobrar (subtotal + iva − retención); subtotal
+  // e IVA quedan como base bruta. Caja/reportes/CxC leen `total`, así que con
+  // esto reflejan lo realmente cobrado sin tocar sus motores.
+  const retPct = Math.max(0, Math.min(100, Number(params.retencionIvaPct) || 0));
+  const retMonto = Math.min(
+    Math.round(calc.montoIva),
+    Math.max(0, Math.round(Number(params.retencionIvaMonto) || 0))
+  );
+  const totalNeto = Math.max(0, Math.round(calc.total) - retMonto);
+
   // 5) Insertar venta
   const insVenta = await sb
     .from("ventas")
@@ -553,7 +568,9 @@ export async function createVentaTransaccionalPg(
       tipo_cambio: params.tipoCambio,
       subtotal: calc.subtotal,
       monto_iva: calc.montoIva,
-      total: calc.total,
+      total: totalNeto,
+      retencion_iva_pct: retPct,
+      retencion_iva_monto: retMonto,
       estado: "completada",
       tipo_venta: params.tipoVenta,
       plazo_dias: params.plazoDias,
@@ -792,8 +809,8 @@ export async function createVentaTransaccionalPg(
           fecha_emision: fechaEmision,
           fecha_vencimiento: fechaVencimiento,
           moneda: params.moneda === "USD" ? "USD" : "PYG",
-          total: calc.total,
-          saldo: calc.total,
+          total: totalNeto,
+          saldo: totalNeto,
           estado: "pendiente",
         })
         .select("id")
@@ -818,7 +835,13 @@ export async function createVentaTransaccionalPg(
     let numeroFactura: string | null = null;
     let facturaWarning: string | null = null;
     if (params.emitirFactura === true) {
-      if (!params.clienteId) {
+      if (retMonto > 0) {
+        // Retención de IVA + factura electrónica requiere un comprobante de
+        // retención SIFEN aparte (no se puede reflejar bajando el total del XML,
+        // que exige total = subtotal + IVA). Se registra como ticket con el neto.
+        facturaWarning =
+          "Venta con retención de IVA registrada como ticket: la factura electrónica con retención necesita un comprobante de retención SIFEN aparte (no disponible aún).";
+      } else if (!params.clienteId) {
         facturaWarning =
           "Venta registrada como ticket: para emitir factura electrónica hay que seleccionar un cliente (SIFEN requiere receptor).";
       } else {

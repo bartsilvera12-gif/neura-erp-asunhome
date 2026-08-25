@@ -25,6 +25,8 @@ export interface CrearPresupuestoInput {
   plazo_entrega: string | null;
   observaciones: string | null;
   items: PresupuestoItemInput[];
+  /** Retención de IVA: % (0–100) sobre el IVA que descuenta del total. */
+  retencion_iva_pct?: number;
 }
 
 function round2(n: number): number {
@@ -101,6 +103,14 @@ export async function crearPresupuesto(
     total += calc.total;
   }
 
+  // Retención de IVA: % sobre el IVA que descuenta del total (total guardado = neto).
+  const retPct = Math.max(0, Math.min(100, Number(input.retencion_iva_pct) || 0));
+  const retMonto = Math.min(
+    round2(montoIva),
+    Math.max(0, round2((montoIva * retPct) / 100))
+  );
+  const totalNeto = Math.max(0, round2(total) - retMonto);
+
   const numero = await siguienteNumeroControl(sb, empresaId);
   const fechaIso = new Date().toISOString();
   let vencimiento: string | null = null;
@@ -125,7 +135,9 @@ export async function crearPresupuesto(
       subtotal: round2(subtotal),
       monto_iva: round2(montoIva),
       descuento_total: round2(descuentoTotal),
-      total: round2(total),
+      total: totalNeto,
+      retencion_iva_pct: retPct,
+      retencion_iva_monto: retMonto,
       validez_dias: input.validez_dias ?? null,
       fecha: fechaIso,
       fecha_vencimiento: vencimiento,

@@ -207,6 +207,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(errorResponse("Totales inválidos."), { status: 400 });
     }
 
+    // Retención de IVA (agente de retención): % sobre el IVA que descuenta del total.
+    // Se recalcula server-side desde el % para no confiar en el monto del cliente.
+    const retencionIvaPct = Math.max(0, Math.min(100, Number(o.retencion_iva_pct) || 0));
+    const retencionIvaMonto = Math.min(
+      Math.round(montoIvaDeclarado),
+      Math.max(0, Math.round((montoIvaDeclarado * retencionIvaPct) / 100))
+    );
+    // Neto a cobrar (lo que efectivamente entra a caja / paga el cliente).
+    const totalNetoCobrar = Math.max(0, Math.round(totalDeclarado) - retencionIvaMonto);
+
     if (moneda === "USD" && tipoCambio <= 0) {
       return NextResponse.json(errorResponse("Tipo de cambio inválido para USD."), { status: 400 });
     }
@@ -265,6 +275,8 @@ export async function POST(request: NextRequest) {
         subtotalDeclarado,
         montoIvaDeclarado,
         totalDeclarado,
+        retencionIvaPct,
+        retencionIvaMonto,
         pedidoCocina,
         permitirSinStock,
         generaNotaRemision: o.genera_nota_remision === true,
@@ -377,7 +389,7 @@ export async function POST(request: NextRequest) {
           metodo_pago: metodoPago,
           entidad_bancaria_id: pd?.entidad_bancaria_id ? String(pd.entidad_bancaria_id) : null,
           entidad_nombre_snapshot: str(pd?.entidad_nombre_snapshot),
-          monto: totalDeclarado,
+          monto: totalNetoCobrar,
           referencia: str(pd?.referencia),
           titular: str(pd?.titular),
           fecha_acreditacion: fechaAcred,
