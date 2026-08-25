@@ -131,6 +131,20 @@ export default function NuevaVentaPage() {
   const [productos, setProductos]   = useState<Producto[]>([]);
   /** Texto en crudo del input de cantidad mientras se edita (permite el vacio). */
   const [cantidadDraft, setCantidadDraft] = useState<Record<number, string>>({});
+  // Series disponibles por producto (solo los que manejan series), para elegir
+  // qué unidad concreta se vende.
+  const [seriesPorProducto, setSeriesPorProducto] = useState<Record<string, { id: string; numero_serie: string }[]>>({});
+
+  async function cargarSeriesProducto(productoId: string) {
+    if (seriesPorProducto[productoId]) return; // ya cargadas
+    try {
+      const r = await fetch(`/api/series?disponibles=1&producto=${productoId}`, { credentials: "include", cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      setSeriesPorProducto((prev) => ({ ...prev, [productoId]: j?.success ? (j.data.filas ?? []) : [] }));
+    } catch {
+      setSeriesPorProducto((prev) => ({ ...prev, [productoId]: [] }));
+    }
+  }
   const [items, setItems]           = useState<LineaVenta[]>([]);
   const [errorLinea, setErrorLinea] = useState<string | null>(null);
   const [errorVenta, setErrorVenta] = useState<string | null>(null);
@@ -785,9 +799,12 @@ export default function NuevaVentaPage() {
           presentacion_id: null,
           presentacion_nombre: null,
           presentacion_cantidad_base: null,
+          maneja_series: productos.find((x) => x.id === p.id)?.maneja_series === true,
+          series_ids: [],
         }),
       ];
     });
+    if (productos.find((x) => x.id === p.id)?.maneja_series === true) void cargarSeriesProducto(p.id);
     setComboQuery("");
     setComboOpen(false);
     setComboHighlight(-1);
@@ -797,6 +814,18 @@ export default function NuevaVentaPage() {
 
   function updateItemCampo(idx: number, patch: Partial<LineaVenta>) {
     setItems((prev) => prev.map((it, i) => (i === idx ? recomputeLinea({ ...it, ...patch }) : it)));
+  }
+  // Series: agregar/quitar una unidad de la línea. La cantidad se sincroniza con
+  // el número de series elegidas (cada serie = 1 unidad).
+  function toggleSerieEnLinea(idx: number, serieId: string) {
+    setItems((prev) => prev.map((it, i) => {
+      if (i !== idx) return it;
+      const actuales = it.series_ids ?? [];
+      const nuevas = actuales.includes(serieId)
+        ? actuales.filter((s) => s !== serieId)
+        : [...actuales, serieId];
+      return recomputeLinea({ ...it, series_ids: nuevas, cantidad: Math.max(1, nuevas.length) });
+    }));
   }
   function changeCantidadItem(idx: number, delta: number) {
     setItems((prev) => prev.map((it, i) => (i === idx ? recomputeLinea({ ...it, cantidad: Math.max(1, it.cantidad + delta) }) : it)));
@@ -842,6 +871,12 @@ export default function NuevaVentaPage() {
     }
     if (!cajaActivaFinal) {
       setErrorVenta("Hay varias cajas abiertas: seleccioná la caja activa antes de confirmar.");
+      return;
+    }
+    // Series: si un producto las maneja, hay que elegir una unidad por cada cantidad.
+    const faltaSerie = items.find((it) => it.maneja_series && (it.series_ids?.length ?? 0) !== it.cantidad);
+    if (faltaSerie) {
+      setErrorVenta(`Elegí ${faltaSerie.cantidad} número(s) de serie para "${faltaSerie.producto_nombre}".`);
       return;
     }
     // Guard duro contra doble submit: si ya hay una confirmación en vuelo, cortar
@@ -1407,6 +1442,38 @@ export default function NuevaVentaPage() {
                               />
                               <button type="button" onClick={() => changeCantidadItem(idx, 1)} className="h-8 w-8 rounded-r-md text-slate-500 hover:bg-slate-100"><Plus className="mx-auto h-3.5 w-3.5" /></button>
                             </div>
+                            {item.maneja_series && (() => {
+                              const disp = seriesPorProducto[item.producto_id] ?? [];
+                              const elegidas = item.series_ids ?? [];
+                              return (
+                                <div className="mt-2 w-44">
+                                  <select
+                                    value=""
+                                    onChange={(e) => { if (e.target.value) toggleSerieEnLinea(idx, e.target.value); }}
+                                    className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs outline-none focus:border-[#4FAEB2]"
+                                  >
+                                    <option value="">+ Elegir serie…</option>
+                                    {disp.filter((s) => !elegidas.includes(s.id)).map((s) => (
+                                      <option key={s.id} value={s.id}>{s.numero_serie}</option>
+                                    ))}
+                                  </select>
+                                  {elegidas.length > 0 && (
+                                    <div className="mt-1 flex flex-wrap gap-1">
+                                      {elegidas.map((sid) => {
+                                        const s = disp.find((x) => x.id === sid);
+                                        return (
+                                          <span key={sid} className="inline-flex items-center gap-1 rounded bg-sky-50 px-1.5 py-0.5 font-mono text-[10px] text-sky-700">
+                                            {s?.numero_serie ?? "?"}
+                                            <button type="button" onClick={() => toggleSerieEnLinea(idx, sid)} className="text-sky-400 hover:text-sky-700">×</button>
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                  {disp.length === 0 && <p className="mt-1 text-[10px] text-amber-600">Sin series en stock.</p>}
+                                </div>
+                              );
+                            })()}
                           </td>
                           {/* Precio unitario: editable libremente; el piso es el costo de compra. */}
                           <td className="px-3 py-2.5 text-right">

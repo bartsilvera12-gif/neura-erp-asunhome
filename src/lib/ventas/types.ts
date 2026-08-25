@@ -30,6 +30,9 @@ export interface LineaVenta {
   presentacion_id?:           string | null;
   presentacion_nombre?:       string | null;
   presentacion_cantidad_base?: number | null;
+  /** ASUNHOME: si el producto maneja series, las unidades elegidas para esta venta. */
+  maneja_series?:        boolean;
+  series_ids?:           string[];
 }
 
 /** Cabecera de venta: condiciones comerciales + totales consolidados. */
