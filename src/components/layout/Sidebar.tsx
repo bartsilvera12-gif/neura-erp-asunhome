@@ -146,10 +146,14 @@ const MENU_STRUCTURE: MenuItem[] = [
     icon: Package,
     children: [
       { label: "Órdenes", href: "/compras" },
+      { label: "Facturas provisorias", href: "/compras/provisorias" },
       { label: "Proveedores", href: "/proveedores" },
     ],
   },
   { key: "pagos", slug: "pagos", label: "Pagos", href: "/pagos", icon: Banknote },
+  // Cuentas por pagar a proveedores (cuotas de compras a crédito). Bajo slug `pagos`
+  // (financiero): visible para admin, oculto para el rol usuario limitado.
+  { key: "cuentas-por-pagar", slug: "pagos", label: "Cuentas por pagar", href: "/cuentas-por-pagar", icon: Banknote },
   { key: "gastos", slug: "gastos", label: "Gastos", href: "/gastos", icon: Receipt },
   // Otros ingresos: ingresos manuales que NO son ventas de productos (cartones,
   // servicios, alquileres). Suman a caja, no tocan inventario. Slug 'ventas'

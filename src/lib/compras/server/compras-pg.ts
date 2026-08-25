@@ -195,6 +195,10 @@ export interface CompraHeaderInput {
   descuenta_caja?: boolean;
   /** Fecha de la compra (YYYY-MM-DD). Si null/undefined, usa now(). Permite backdate. */
   fecha?: string | null;
+  /** Estado inicial de las filas ('registrada' por defecto, 'provisoria' para factura provisoria). */
+  estado?: string;
+  /** Si viene, se APPENDEA a ese numero_control (agregar productos a una provisoria) en vez de generar uno nuevo. */
+  numero_control_existente?: string | null;
 }
 
 /** Una línea (producto) de la compra. */
@@ -243,7 +247,11 @@ export async function insertComprasConImpactoTx(
 
   const insertedRows: CompraRow[] = [];
   const warnings: string[] = [];
-  const numero = await nextNumeroControl(client, schema, empresaId);
+  // Para provisorias que se van cargando, se reutiliza el numero_control existente.
+  const numero = header.numero_control_existente?.trim()
+    ? header.numero_control_existente.trim()
+    : await nextNumeroControl(client, schema, empresaId);
+  const estadoFila = header.estado === "provisoria" ? "provisoria" : "registrada";
 
   for (const it of items) {
     const { rows: compraRows } = await client.query<CompraRow>(
@@ -262,7 +270,7 @@ export async function insertComprasConImpactoTx(
          $11, $12::numeric, $13::numeric, $14::numeric, $15::numeric, $16::numeric,
          $17, $18::integer, $19, $20, $21::date, $22,
          $23, $24::uuid,
-         $25, 'registrada', COALESCE($32::timestamptz, now()),
+         $25, $33, COALESCE($32::timestamptz, now()),
          $26, $27, $28, $29,
          $30::uuid, $31
        )
@@ -281,6 +289,7 @@ export async function insertComprasConImpactoTx(
         header.comprobante_nombre, header.comprobante_mime_type,
         header.created_by, header.usuario_nombre,
         header.fecha ?? null,
+        estadoFila,
       ]
     );
     insertedRows.push(compraRows[0]);

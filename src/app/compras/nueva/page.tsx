@@ -134,6 +134,13 @@ export default function NuevaCompraPage() {
   const [errorSubmit, setErrorSubmit] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Factura provisoria: guardar sin datos de factura e ir cargando durante el mes.
+  const [guardarProvisoria, setGuardarProvisoria] = useState(false);
+  // Append: ?provisoria=NUMERO → agregar productos a una provisoria existente.
+  const [provisoriaNumero, setProvisoriaNumero] = useState<string | null>(null);
+  const [provisoriaProveedorNombre, setProvisoriaProveedorNombre] = useState<string | null>(null);
+  const esProvisoriaMode = guardarProvisoria || !!provisoriaNumero;
+
   function handleComprobanteChange(e: React.ChangeEvent<HTMLInputElement>) {
     setComprobanteError(null);
     const f = e.target.files?.[0] ?? null;
@@ -156,6 +163,30 @@ export default function NuevaCompraPage() {
   }
   function recargarProductos() { getProductos().then(setProductos); }
   useEffect(() => { recargarProveedores(); recargarProductos(); }, []);
+
+  // Modo "agregar productos a una provisoria": lee ?provisoria=NUMERO, trae su
+  // proveedor/moneda y bloquea esos campos para no mezclar proveedores.
+  useEffect(() => {
+    let num: string | null = null;
+    try { num = new URLSearchParams(window.location.search).get("provisoria"); } catch { num = null; }
+    if (!num) return;
+    setProvisoriaNumero(num);
+    (async () => {
+      try {
+        const r = await fetch("/api/compras/provisorias", { credentials: "include", cache: "no-store" });
+        const j = await r.json();
+        const lista = j?.data?.provisorias as Array<Record<string, unknown>> | undefined;
+        const prov = lista?.find((p) => String(p.numero_control) === num);
+        if (!prov) return;
+        setProvisoriaProveedorNombre(typeof prov.proveedor_nombre === "string" ? prov.proveedor_nombre : null);
+        setCab((prev) => ({
+          ...prev,
+          proveedor_id: prov.proveedor_id ? String(prov.proveedor_id) : prev.proveedor_id,
+          moneda: prov.moneda === "USD" ? "USD" : "PYG",
+        }));
+      } catch { /* si falla, el usuario elige proveedor manualmente */ }
+    })();
+  }, []);
 
   const tipoCambioNum = cab.moneda === "USD" ? parseFloat(cab.tipo_cambio) || 0 : 1;
 
@@ -237,8 +268,9 @@ export default function NuevaCompraPage() {
     e.preventDefault();
     setErrorSubmit(null);
     if (!cab.proveedor_id) return setErrorSubmit("Seleccioná o agregá un proveedor.");
-    if (!cab.nro_timbrado.trim()) return setErrorSubmit("Ingresá el N° de timbrado.");
-    if (!cab.numero_factura.trim()) return setErrorSubmit("Ingresá el N° de factura.");
+    // En provisoria el timbrado y la factura se completan al convertir en definitiva.
+    if (!esProvisoriaMode && !cab.nro_timbrado.trim()) return setErrorSubmit("Ingresá el N° de timbrado.");
+    if (!esProvisoriaMode && !cab.numero_factura.trim()) return setErrorSubmit("Ingresá el N° de factura.");
     if (lineas.length === 0) return setErrorSubmit("Agregá al menos un producto a la compra.");
     if (cab.moneda === "USD" && tipoCambioNum <= 0)
       return setErrorSubmit("Cargá el tipo de cambio (USD → Gs.).");
@@ -290,6 +322,8 @@ export default function NuevaCompraPage() {
           comprobante_nombre: comprobante?.comprobante_nombre ?? null,
           comprobante_mime_type: comprobante?.comprobante_mime_type ?? null,
           descuenta_caja: cab.descuenta_caja && cab.tipo_pago === "contado" && cab.moneda === "PYG",
+          estado: esProvisoriaMode ? "provisoria" : "registrada",
+          numero_control: provisoriaNumero,
         },
         items
       );
@@ -309,7 +343,7 @@ export default function NuevaCompraPage() {
       }
       if (dup.length > 0) alert(`Compra registrada. Estas series ya existían y se omitieron: ${dup.join(", ")}`);
 
-      router.push("/compras");
+      router.push(esProvisoriaMode ? "/compras/provisorias" : "/compras");
     } finally {
       setSubmitting(false);
     }
@@ -421,15 +455,40 @@ export default function NuevaCompraPage() {
           {/* ── Cabecera ─────────────────────────────────────────────────────── */}
           <section className="space-y-4">
             <SectionTitle>Comprobante y proveedor</SectionTitle>
+
+            {/* Factura provisoria: crear/append. */}
+            {provisoriaNumero ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                Agregando productos a la <strong>factura provisoria {provisoriaNumero}</strong>
+                {provisoriaProveedorNombre ? <> — Proveedor: <strong>{provisoriaProveedorNombre}</strong></> : null}.
+                El timbrado y el N° de factura se completan al convertirla en definitiva.
+              </div>
+            ) : (
+              <label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={guardarProvisoria}
+                  onChange={(e) => setGuardarProvisoria(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#4FAEB2] focus:ring-[#4FAEB2]"
+                />
+                <span>
+                  <span className="font-medium text-slate-800">Guardar como factura provisoria</span>
+                  <span className="block text-[12px] text-slate-500">
+                    Sin datos de factura todavía. Podés seguir agregando productos durante el mes y, cuando llegue la factura real, convertirla en definitiva (ahí se generan las cuotas).
+                  </span>
+                </span>
+              </label>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className={labelClass}>N° de timbrado <span className="text-red-500">*</span></label>
+                <label className={labelClass}>N° de timbrado {esProvisoriaMode ? <span className="text-gray-400 font-normal">(opcional)</span> : <span className="text-red-500">*</span>}</label>
                 <input type="text" name="nro_timbrado" value={cab.nro_timbrado}
                   onChange={(e) => setCab((p) => ({ ...p, nro_timbrado: e.target.value }))}
                   placeholder="Ej: 001-001-0000001" className={inputClass} />
               </div>
               <div>
-                <label className={labelClass}>N° de factura <span className="text-red-500">*</span></label>
+                <label className={labelClass}>N° de factura {esProvisoriaMode ? <span className="text-gray-400 font-normal">(opcional)</span> : <span className="text-red-500">*</span>}</label>
                 <input type="text" name="numero_factura" value={cab.numero_factura}
                   onChange={(e) => setCab((p) => ({ ...p, numero_factura: e.target.value }))}
                   placeholder="Ej: 001-001-0000123" className={inputClass} />

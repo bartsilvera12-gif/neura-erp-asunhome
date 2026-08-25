@@ -114,6 +114,10 @@ export interface CompraHeaderPayload {
   comprobante_nombre?: string | null;
   comprobante_mime_type?: string | null;
   descuenta_caja?: boolean;
+  /** 'provisoria' para factura provisoria (timbrado/factura opcionales). */
+  estado?: "provisoria" | "registrada";
+  /** Si viene, se agregan las líneas a esa compra provisoria existente. */
+  numero_control?: string | null;
 }
 
 export interface UploadComprobanteResult {
