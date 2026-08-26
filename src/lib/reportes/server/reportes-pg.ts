@@ -474,3 +474,83 @@ export async function getReporteConciliacion(
     movimientos,
   };
 }
+
+// ── Rentabilidad (ganancia con COSTO HISTÓRICO snapshot por venta) ──────────────
+// Ingreso = subtotal (sin IVA). Costo = ventas_items.costo_unitario (snapshot al
+// momento de la venta) × cantidad. La ganancia NO cambia aunque el costo del
+// producto cambie después por nuevas compras.
+
+export interface RentabilidadProductoRow {
+  producto_nombre: string;
+  cantidad: number;
+  ingreso: number;   // sin IVA
+  costo: number;     // snapshot
+  ganancia: number;
+  margen: number;    // % sobre ingreso sin IVA
+}
+
+export interface RentabilidadReporte {
+  mes: string;
+  totales: { ingreso: number; costo: number; ganancia: number; margen: number };
+  por_producto: RentabilidadProductoRow[];
+  sin_costo_items: number; // líneas sin costo snapshot (ventas viejas) — aviso de precisión
+}
+
+export async function getReporteRentabilidad(
+  schemaRaw: string,
+  empresaId: string,
+  b: MesBounds
+): Promise<RentabilidadReporte> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const tV = quoteSchemaTable(schema, "ventas");
+  const tVI = quoteSchemaTable(schema, "ventas_items");
+  const p = pool();
+  const perV = `v.empresa_id=$1::uuid AND v.fecha>=$2::timestamptz AND v.fecha<=$3::timestamptz AND COALESCE(v.estado,'') NOT IN ('anulada','devuelta_total')`;
+  const args = [empresaId, b.start, b.end];
+
+  const porProdQ = await p.query<{
+    producto_nombre: string; cantidad: number; ingreso: number; costo: number;
+  }>(
+    `SELECT vi.producto_nombre,
+            SUM(vi.cantidad)::float8 AS cantidad,
+            SUM(vi.subtotal)::float8 AS ingreso,
+            SUM(vi.costo_unitario * vi.cantidad)::float8 AS costo
+       FROM ${tVI} vi JOIN ${tV} v ON v.id=vi.venta_id
+      WHERE ${perV}
+      GROUP BY vi.producto_id, vi.producto_nombre
+      ORDER BY (SUM(vi.subtotal) - SUM(vi.costo_unitario * vi.cantidad)) DESC`,
+    args
+  );
+
+  const sinCostoQ = await p.query<{ n: number }>(
+    `SELECT count(*)::int AS n
+       FROM ${tVI} vi JOIN ${tV} v ON v.id=vi.venta_id
+      WHERE ${perV} AND COALESCE(vi.costo_unitario,0) = 0`,
+    args
+  );
+
+  const por_producto: RentabilidadProductoRow[] = porProdQ.rows.map((r) => {
+    const ingreso = num(r.ingreso);
+    const costo = num(r.costo);
+    const ganancia = ingreso - costo;
+    return {
+      producto_nombre: r.producto_nombre,
+      cantidad: num(r.cantidad),
+      ingreso: Math.round(ingreso),
+      costo: Math.round(costo),
+      ganancia: Math.round(ganancia),
+      margen: ingreso > 0 ? (ganancia / ingreso) * 100 : 0,
+    };
+  });
+
+  const ingreso = por_producto.reduce((s, r) => s + r.ingreso, 0);
+  const costo = por_producto.reduce((s, r) => s + r.costo, 0);
+  const ganancia = ingreso - costo;
+
+  return {
+    mes: b.mes,
+    totales: { ingreso, costo, ganancia, margen: ingreso > 0 ? (ganancia / ingreso) * 100 : 0 },
+    por_producto,
+    sin_costo_items: num(sinCostoQ.rows[0]?.n),
+  };
+}

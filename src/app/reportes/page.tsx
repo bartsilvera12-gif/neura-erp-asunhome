@@ -2,7 +2,7 @@
 
 import PageHeader from "@/components/ui/PageHeader";
 import { ReportCard } from "@/components/reportes/ReportCard";
-import { Wallet, Truck, Package, ShoppingCart, ArrowLeftRight, Lock, BarChart3, CalendarClock, CreditCard } from "lucide-react";
+import { Wallet, Truck, Package, ShoppingCart, ArrowLeftRight, Lock, BarChart3, CalendarClock, CreditCard, TrendingUp } from "lucide-react";
 
 /** Hub de reportería operativa (Fase 1: Estado de cuenta + Proveedores). */
 export default function ReportesPage() {
@@ -31,6 +31,15 @@ export default function ReportesPage() {
             icon={ShoppingCart}
             description="Ventas del mes, desglose por tipo de precio (minorista/mayorista/al costo) y por producto."
             href="/reportes/ventas"
+          />
+        </li>
+        <li>
+          <ReportCard
+            title="Rentabilidad"
+            subtitle="Ganancia con costo histórico"
+            icon={TrendingUp}
+            description="Ganancia y margen por producto usando el costo al momento de cada venta. No cambia aunque el costo de compra se actualice después."
+            href="/reportes/rentabilidad"
           />
         </li>
         <li>
