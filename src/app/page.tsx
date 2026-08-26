@@ -1793,7 +1793,11 @@ const DashVentas = memo(function DashVentas({
   const gananciaHoy = useMemo(() =>
     ventasHoy.flatMap(v => v.lineas ?? []).reduce((s, l) => {
       if (!l) return s;
-      const costo = prodMap[l.producto_id]?.costo_promedio ?? 0;
+      // Costo AL MOMENTO de la venta (snapshot). Solo si la venta es vieja y no
+      // tiene snapshot (costo_unitario 0) se cae al costo actual del producto.
+      const costo = (l.costo_unitario ?? 0) > 0
+        ? l.costo_unitario
+        : (prodMap[l.producto_id]?.costo_promedio ?? 0);
       return s + (l.precio_venta - costo) * l.cantidad;
     }, 0),
     [ventasHoy, prodMap]
@@ -1864,7 +1868,7 @@ const DashVentas = memo(function DashVentas({
               Gs. {formatGsFull(gananciaHoy)}
             </p>
             <p className="text-xs font-semibold text-gray-700 mt-0.5">Ganancia del día</p>
-            <p className="text-xs text-gray-400">precio venta − costo promedio × cant.</p>
+            <p className="text-xs text-gray-400">precio venta − costo al momento de la venta × cant.</p>
           </div>
         </div>
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex items-start gap-3">

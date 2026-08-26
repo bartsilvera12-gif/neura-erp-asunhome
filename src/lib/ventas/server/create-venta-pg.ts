@@ -616,6 +616,14 @@ export async function createVentaTransaccionalPg(
     //    historicos sigan funcionando aunque la presentacion cambie despues.
     const itemsRows = items.map((line, i) => {
       const lr = lineResolved[i];
+      // SNAPSHOT de costo al momento de la venta (por presentación, mismas
+      // unidades que precio_venta). Inmutable: la ganancia histórica NO se
+      // altera aunque el costo del producto cambie por compras posteriores.
+      const costoBaseUnit = Number(stockMap.get(line.producto_id)?.costo) || 0;
+      const basePorPresentacion = line.cantidad > 0
+        ? lr.cantidadTotalBase / line.cantidad
+        : Number(lr.presentacionCantBase) || 1;
+      const costoUnitarioSnapshot = Math.round(costoBaseUnit * basePorPresentacion);
       return {
         empresa_id: params.empresaId,
         venta_id: ventaId,
@@ -625,6 +633,7 @@ export async function createVentaTransaccionalPg(
         cantidad: line.cantidad,
         precio_venta_original: line.precio_venta_original,
         precio_venta: line.precio_venta,
+        costo_unitario: costoUnitarioSnapshot,
         tipo_iva: line.tipo_iva,
         tipo_precio: line.tipo_precio,
         subtotal: line.subtotal,

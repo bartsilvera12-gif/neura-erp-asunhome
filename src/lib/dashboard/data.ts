@@ -71,6 +71,8 @@ export interface LineaVentaRaw {
   sku?: string;
   cantidad: number;
   precio_venta: number;
+  /** Costo por presentación al momento de la venta (snapshot). 0 en ventas viejas sin snapshot. */
+  costo_unitario: number;
   subtotal: number;
   monto_iva?: number;
   total: number;
@@ -452,6 +454,7 @@ export async function getDashboardData(): Promise<DashboardData> {
         sku: r.sku as string | undefined,
         cantidad: Number(r.cantidad) ?? 0,
         precio_venta: Number(r.precio_venta) ?? 0,
+        costo_unitario: Number(r.costo_unitario) || 0,
         subtotal: Number(r.subtotal) ?? 0,
         monto_iva: Number(r.monto_iva) ?? 0,
         total: Number(r.total_linea) ?? 0,
