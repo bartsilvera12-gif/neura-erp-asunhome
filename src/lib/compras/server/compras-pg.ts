@@ -524,3 +524,165 @@ export async function insertCompraConImpacto(
     client.release();
   }
 }
+
+/**
+ * EDICIÓN COMPLETA de una compra ya registrada (productos, cantidades, costos).
+ * Estrategia segura, en una sola transacción:
+ *   1) valida que no tenga pagos registrados en cuentas por pagar
+ *   2) revierte el stock de las líneas viejas + borra sus movimientos ENTRADA
+ *   3) borra las líneas viejas y reinserta las nuevas con el MISMO numero_control
+ *      (reaplicando stock, costo_promedio, precio_venta y proveedor_producto)
+ *   4) si tenía cuenta por pagar (definitiva a crédito), la regenera con el nuevo total
+ * Mantiene el estado (provisoria sigue provisoria).
+ */
+export async function editarCompraCompleta(
+  schemaRaw: string,
+  empresaId: string,
+  numeroControl: string,
+  header: CompraHeaderInput,
+  items: CompraItemInput[]
+): Promise<ComprasMultiResult> {
+  const { calcularCuotas, addDaysYmd } = await import("@/lib/cuentas-por-pagar/server/cxp-pg");
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const tC = quoteSchemaTable(schema, "compras");
+  const tP = quoteSchemaTable(schema, "productos");
+  const tM = quoteSchemaTable(schema, "movimientos_inventario");
+  const tCxp = quoteSchemaTable(schema, "cuentas_por_pagar");
+  const tCuo = quoteSchemaTable(schema, "compra_cuotas");
+  const tPag = quoteSchemaTable(schema, "pagos_proveedores");
+  const tProv = quoteSchemaTable(schema, "proveedores");
+
+  if (!Array.isArray(items) || items.length === 0) throw new Error("La compra debe tener al menos un producto.");
+
+  const client = await pool().connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: viejas } = await client.query<{ producto_id: string; cantidad: string; estado: string }>(
+      `SELECT producto_id, cantidad::text, estado FROM ${tC}
+        WHERE empresa_id = $1::uuid AND numero_control = $2 AND anulada_at IS NULL
+        FOR UPDATE`,
+      [empresaId, numeroControl]
+    );
+    if (viejas.length === 0) throw new Error("Compra no encontrada o anulada.");
+    const estadoPrev = viejas[0].estado === "provisoria" ? "provisoria" : "registrada";
+
+    // Guard: si hay cuenta por pagar con pagos registrados, no se edita.
+    const { rows: cxpRows } = await client.query<{ id: string }>(
+      `SELECT id FROM ${tCxp} WHERE empresa_id = $1::uuid AND compra_numero_control = $2`,
+      [empresaId, numeroControl]
+    );
+    if (cxpRows.length > 0) {
+      const { rows: pg } = await client.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM ${tPag} WHERE cuenta_por_pagar_id = $1::uuid`,
+        [cxpRows[0].id]
+      );
+      if ((Number(pg[0]?.n) || 0) > 0) {
+        throw new Error("La compra tiene pagos registrados en cuentas por pagar. Anulá los pagos antes de editar.");
+      }
+    }
+
+    // Revertir stock de las líneas viejas + borrar sus movimientos ENTRADA.
+    for (const v of viejas) {
+      const cant = Number(v.cantidad) || 0;
+      if (cant > 0) {
+        await client.query(
+          `UPDATE ${tP} SET stock_actual = GREATEST(0, stock_actual - $1::numeric), updated_at = now()
+            WHERE id = $2::uuid AND empresa_id = $3::uuid`,
+          [cant, v.producto_id, empresaId]
+        );
+      }
+    }
+    await client.query(
+      `DELETE FROM ${tM} WHERE empresa_id = $1::uuid AND referencia = $2 AND tipo = 'ENTRADA'`,
+      [empresaId, numeroControl]
+    );
+    await client.query(`DELETE FROM ${tC} WHERE empresa_id = $1::uuid AND numero_control = $2`, [empresaId, numeroControl]);
+
+    // Reinsertar con el mismo numero_control (reaplica stock/costo/precio).
+    const out = await insertComprasConImpactoTx(
+      client, schema, empresaId,
+      { ...header, estado: estadoPrev, numero_control_existente: numeroControl },
+      items
+    );
+
+    // Regenerar la cuenta por pagar si existía y la compra es definitiva.
+    if (cxpRows.length > 0) {
+      await client.query(`DELETE FROM ${tCxp} WHERE id = $1::uuid`, [cxpRows[0].id]); // cascade cuotas
+      const fechaEmision = header.fecha_factura && /^\d{4}-\d{2}-\d{2}$/.test(header.fecha_factura)
+        ? header.fecha_factura : null;
+      if (estadoPrev === "registrada" && fechaEmision) {
+        const total = out.compras.reduce((s, r) => s + (Number(r.total) || 0), 0);
+        const { rows: pr } = await client.query<{ dias_gracia: number | null; plazos_cuotas: number[] | null }>(
+          `SELECT dias_gracia, plazos_cuotas FROM ${tProv} WHERE id = $1::uuid AND empresa_id = $2::uuid`,
+          [header.proveedor_id, empresaId]
+        );
+        const diasGracia = Number(pr[0]?.dias_gracia) || 0;
+        const plazos = Array.isArray(pr[0]?.plazos_cuotas) ? pr[0].plazos_cuotas.map(Number) : [];
+        const cuotas = plazos.length > 0
+          ? calcularCuotas(total, fechaEmision, diasGracia, plazos)
+          : calcularCuotas(total, fechaEmision, diasGracia, [0]);
+        const fechaInicio = addDaysYmd(fechaEmision, diasGracia);
+        const { rows: nueva } = await client.query<{ id: string }>(
+          `INSERT INTO ${tCxp} (
+             empresa_id, proveedor_id, proveedor_nombre, compra_numero_control,
+             fecha_emision, dias_gracia, fecha_inicio_pago, moneda, total, saldo, estado
+           ) VALUES ($1::uuid,$2::uuid,$3,$4,$5::date,$6::integer,$7::date,$8,$9::numeric,$9::numeric,'pendiente')
+           RETURNING id`,
+          [empresaId, header.proveedor_id, header.proveedor_nombre, numeroControl,
+           fechaEmision, diasGracia, fechaInicio, header.moneda === "USD" ? "USD" : "PYG", Math.round(total)]
+        );
+        for (const c of cuotas) {
+          await client.query(
+            `INSERT INTO ${tCuo} (empresa_id, cuenta_por_pagar_id, numero_cuota, dias_plazo, fecha_vencimiento, monto, saldo, estado)
+             VALUES ($1::uuid,$2::uuid,$3::integer,$4::integer,$5::date,$6::numeric,$6::numeric,'pendiente')`,
+            [empresaId, nueva[0].id, c.numero_cuota, c.dias_plazo, c.fecha_vencimiento, c.monto]
+          );
+        }
+      }
+    }
+
+    await client.query("COMMIT");
+    return out;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => null);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Trae la cabecera + líneas de una compra por numero_control (para editar). */
+export async function getCompraByNumeroControl(
+  schemaRaw: string,
+  empresaId: string,
+  numeroControl: string
+): Promise<{ header: Record<string, unknown>; items: Record<string, unknown>[] } | null> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const tC = quoteSchemaTable(schema, "compras");
+  const { rows } = await pool().query(
+    `SELECT id, proveedor_id, proveedor_nombre, producto_id, producto_nombre,
+            cantidad::float8 AS cantidad, moneda, tipo_cambio::float8 AS tipo_cambio,
+            costo_unitario_original::float8 AS costo_unitario_original,
+            costo_unitario::float8 AS costo_unitario, iva_tipo,
+            subtotal::float8 AS subtotal, monto_iva::float8 AS monto_iva, total::float8 AS total,
+            precio_venta::float8 AS precio_venta, margen_venta::float8 AS margen_venta,
+            tipo_pago, plazo_dias, nro_timbrado, numero_factura,
+            to_char(fecha_factura,'YYYY-MM-DD') AS fecha_factura,
+            to_char(fecha,'YYYY-MM-DD') AS fecha, observacion, estado
+       FROM ${tC}
+      WHERE empresa_id = $1::uuid AND numero_control = $2 AND anulada_at IS NULL
+      ORDER BY id`,
+    [empresaId, numeroControl]
+  );
+  if (rows.length === 0) return null;
+  const r0 = rows[0] as Record<string, unknown>;
+  const header = {
+    numero_control: numeroControl,
+    proveedor_id: r0.proveedor_id, proveedor_nombre: r0.proveedor_nombre,
+    moneda: r0.moneda, tipo_cambio: r0.tipo_cambio, tipo_pago: r0.tipo_pago, plazo_dias: r0.plazo_dias,
+    nro_timbrado: r0.nro_timbrado, numero_factura: r0.numero_factura,
+    fecha_factura: r0.fecha_factura, fecha: r0.fecha, observacion: r0.observacion, estado: r0.estado,
+  };
+  return { header, items: rows as Record<string, unknown>[] };
+}

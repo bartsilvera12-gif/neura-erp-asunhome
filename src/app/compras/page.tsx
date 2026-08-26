@@ -372,10 +372,17 @@ export default function ComprasPage() {
                                   });
                                 }}
                                 className="text-xs font-semibold text-slate-600 hover:underline"
-                                title="Editar factura/timbrado/observación (no afecta stock)"
+                                title="Editar solo factura/timbrado/observación (no afecta stock)"
                               >
-                                Editar
+                                Editar factura
                               </button>
+                              <Link
+                                href={`/compras/nueva?editar=${encodeURIComponent(g.numero_control)}`}
+                                className="text-xs font-semibold text-[#3F8E91] hover:underline"
+                                title="Editar productos, cantidades y costos (revierte y reaplica stock)"
+                              >
+                                Editar productos
+                              </Link>
                               <button
                                 type="button"
                                 onClick={() => setAnularCompraTarget({ numero_control: g.numero_control, total: g.total })}

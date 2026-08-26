@@ -12,6 +12,7 @@ import type { TipoIva, TipoPago, Moneda } from "@/lib/compras/types";
 import type { Proveedor } from "@/lib/proveedores/types";
 import type { MetodoValuacion, Producto } from "@/lib/inventario/types";
 import { productoMatchesQuery } from "@/lib/productos/token-search";
+import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -139,7 +140,10 @@ export default function NuevaCompraPage() {
   // Append: ?provisoria=NUMERO → agregar productos a una provisoria existente.
   const [provisoriaNumero, setProvisoriaNumero] = useState<string | null>(null);
   const [provisoriaProveedorNombre, setProvisoriaProveedorNombre] = useState<string | null>(null);
-  const esProvisoriaMode = guardarProvisoria || !!provisoriaNumero;
+  // Edición completa: ?editar=NUMERO → reemplaza productos/costos de una compra.
+  const [editarNumero, setEditarNumero] = useState<string | null>(null);
+  const [edicionEstado, setEdicionEstado] = useState<string>("registrada");
+  const esProvisoriaMode = guardarProvisoria || !!provisoriaNumero || edicionEstado === "provisoria";
 
   function handleComprobanteChange(e: React.ChangeEvent<HTMLInputElement>) {
     setComprobanteError(null);
@@ -185,6 +189,55 @@ export default function NuevaCompraPage() {
           moneda: prov.moneda === "USD" ? "USD" : "PYG",
         }));
       } catch { /* si falla, el usuario elige proveedor manualmente */ }
+    })();
+  }, []);
+
+  // Modo "editar compra completa": lee ?editar=NUMERO, trae la compra y precarga
+  // cabecera + líneas para reemplazar productos/costos.
+  useEffect(() => {
+    let num: string | null = null;
+    try { num = new URLSearchParams(window.location.search).get("editar"); } catch { num = null; }
+    if (!num) return;
+    setEditarNumero(num);
+    (async () => {
+      try {
+        const r = await fetch(`/api/compras/${encodeURIComponent(num)}`, { credentials: "include", cache: "no-store" });
+        const j = await r.json();
+        const h = j?.data?.header as Record<string, unknown> | undefined;
+        const its = j?.data?.items as Record<string, unknown>[] | undefined;
+        if (!h || !its) return;
+        setEdicionEstado(String(h.estado ?? "registrada"));
+        setCab({
+          nro_timbrado: String(h.nro_timbrado ?? ""),
+          numero_factura: String(h.numero_factura ?? ""),
+          fecha: String(h.fecha ?? ""),
+          fecha_factura: String(h.fecha_factura ?? ""),
+          proveedor_id: h.proveedor_id ? String(h.proveedor_id) : "",
+          moneda: h.moneda === "USD" ? "USD" : "PYG",
+          tipo_cambio: h.tipo_cambio ? String(h.tipo_cambio) : "",
+          tipo_pago: h.tipo_pago === "credito" ? "credito" : "contado",
+          plazo_dias: h.plazo_dias != null ? String(h.plazo_dias) : "",
+          descuenta_caja: false,
+        });
+        const ivaMap = (v: unknown): TipoIva => (v === "exenta" || v === "5" || v === "10" ? (v as TipoIva) : "10");
+        setLineas(its.map((it) => ({
+          producto_id: String(it.producto_id),
+          producto_nombre: String(it.producto_nombre ?? ""),
+          sku: "",
+          es_insumo_no_vendible: (Number(it.precio_venta) || 0) <= 0,
+          cantidad: Number(it.cantidad) || 0,
+          costo_unitario_input: Number(it.costo_unitario_original) || Number(it.costo_unitario) || 0,
+          costo_unitario_pyg: Number(it.costo_unitario) || 0,
+          iva_tipo: ivaMap(it.iva_tipo),
+          precio_venta: Number(it.precio_venta) || 0,
+          subtotal: Number(it.subtotal) || 0,
+          monto_iva: Number(it.monto_iva) || 0,
+          total: Number(it.total) || 0,
+          margen_venta: it.margen_venta != null ? Number(it.margen_venta) : null,
+          maneja_series: false,
+          series_texto: "",
+        })));
+      } catch { /* si falla, queda como compra nueva vacía */ }
     })();
   }, []);
 
@@ -298,6 +351,33 @@ export default function NuevaCompraPage() {
 
     setSubmitting(true);
     try {
+      // ── Modo EDICIÓN completa: PUT que reemplaza productos/costos y reaplica stock ──
+      if (editarNumero) {
+        const r = await fetchWithSupabaseSession(`/api/compras/${encodeURIComponent(editarNumero)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            proveedor_id: String(proveedor.id),
+            proveedor_nombre: proveedor.nombre,
+            moneda: cab.moneda,
+            tipo_cambio: tipoCambioNum,
+            tipo_pago: cab.tipo_pago,
+            plazo_dias: cab.tipo_pago === "credito" && cab.plazo_dias ? parseInt(cab.plazo_dias) : undefined,
+            nro_timbrado: cab.nro_timbrado,
+            numero_factura: cab.numero_factura,
+            fecha_factura: cab.fecha_factura || null,
+            fecha: cab.fecha || null,
+            estado: edicionEstado === "provisoria" ? "provisoria" : "registrada",
+            items,
+          }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j?.success === false) { setErrorSubmit(j?.error ?? `Error ${r.status} al editar la compra.`); return; }
+        if (j?.data?.warning) alert(j.data.warning);
+        router.push(edicionEstado === "provisoria" ? "/compras/provisorias" : "/compras");
+        return;
+      }
+
       // Subir comprobante primero (si hay) para asociarlo a toda la compra.
       let comprobante: { comprobante_storage_path: string; comprobante_nombre: string; comprobante_mime_type: string } | null = null;
       if (comprobanteFile) {
@@ -445,7 +525,7 @@ export default function NuevaCompraPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-bold text-gray-800">Nueva compra</h1>
+        <h1 className="text-3xl font-bold text-gray-800">{editarNumero ? `Editar compra ${editarNumero}` : "Nueva compra"}</h1>
         <p className="text-gray-600">Una compra puede tener varios productos del mismo proveedor. Impacta el inventario al guardar.</p>
       </div>
 
@@ -849,7 +929,7 @@ export default function NuevaCompraPage() {
           <div className="flex gap-4 pt-2">
             <button type="submit" disabled={lineas.length === 0 || submitting}
               className="bg-[#0EA5E9] hover:bg-[#0284C7] text-white px-5 py-3 rounded-lg text-sm font-medium transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed active:scale-95">
-              {submitting ? "Guardando..." : "Guardar compra"}
+              {submitting ? "Guardando..." : editarNumero ? "Guardar cambios" : "Guardar compra"}
             </button>
             <button type="button" onClick={() => router.push("/compras")}
               className="border border-slate-200 px-5 py-3 rounded-lg text-sm hover:bg-slate-50 transition-colors">
