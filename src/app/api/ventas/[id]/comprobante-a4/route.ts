@@ -243,7 +243,8 @@ export async function GET(
   * { box-sizing: border-box; }
   /* Sin tamaño fijo: así el desplegable de papel del diálogo de Chrome queda
      habilitado y el usuario elige A4/Carta/Oficio ahí mismo. */
-  @page { margin: 8mm; }
+  /* margin: 0 quita el encabezado/pie del navegador (fecha, título y URL). */
+  @page { margin: 0; }
   html, body { margin: 0; padding: 0; background: #f1f1f1; color: #111; font-family: 'Courier New', ui-monospace, monospace; font-size: 11.5px; }
   .hoja {
     background: #fff;
@@ -328,7 +329,7 @@ export async function GET(
 
   @media print {
     html, body { background: #fff; font-size: 10.5px; }
-    .hoja { box-shadow: none; margin: 0; width: auto; min-height: 0; padding: 4mm 6mm; }
+    .hoja { box-shadow: none; margin: 0; width: auto; min-height: 0; padding: 10mm 10mm; }
       .header-top { margin-bottom: 6px; }
     .header-top .logo { max-height: 42px; }
     .fecha-top { font-size: 11px; }
