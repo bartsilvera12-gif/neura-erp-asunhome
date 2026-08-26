@@ -208,8 +208,8 @@ export async function insertProveedor(
       d.estado ?? "activo",
       d.condicion_pago ?? null,
       d.plazo_pago_dias ?? null,
-      d.dias_gracia ?? null,
-      d.plazos_cuotas ?? null,
+      d.dias_gracia ?? 0,          // NOT NULL en DB: null → 0
+      d.plazos_cuotas ?? [],       // NOT NULL en DB: null → arreglo vacío
       d.moneda_preferida ?? null,
       d.observaciones ?? null,
     ]
@@ -244,8 +244,8 @@ export async function updateProveedor(
   if (d.estado !== undefined) setIf("estado", d.estado);
   if (d.condicion_pago !== undefined) setIf("condicion_pago", d.condicion_pago ?? null);
   if (d.plazo_pago_dias !== undefined) setIf("plazo_pago_dias", d.plazo_pago_dias ?? null, "::integer");
-  if (d.dias_gracia !== undefined) setIf("dias_gracia", d.dias_gracia ?? null, "::integer");
-  if (d.plazos_cuotas !== undefined) setIf("plazos_cuotas", d.plazos_cuotas ?? null, "::integer[]");
+  if (d.dias_gracia !== undefined) setIf("dias_gracia", d.dias_gracia ?? 0, "::integer");
+  if (d.plazos_cuotas !== undefined) setIf("plazos_cuotas", d.plazos_cuotas ?? [], "::integer[]");
   if (d.moneda_preferida !== undefined) setIf("moneda_preferida", d.moneda_preferida ?? null);
   if (d.observaciones !== undefined) setIf("observaciones", d.observaciones ?? null);
   if (sets.length === 0) return await getProveedorById(schemaRaw, empresaId, id);
