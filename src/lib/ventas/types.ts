@@ -68,6 +68,10 @@ export interface Venta {
   /** Observaciones libres de la venta (editables sin tocar ítems ni montos). */
   observaciones?: string | null;
 
+  /** Vendedor acreditado para comisión (editable). */
+  vendedor_id?: string | null;
+  vendedor_nombre?: string | null;
+
   /** Cliente asociado a la venta (opcional; una venta puede no tener cliente). */
   cliente_id?: string | null;
   /** Nombre del cliente (razón social / contacto) para mostrar y filtrar en el listado. */

@@ -2,7 +2,7 @@
 
 import PageHeader from "@/components/ui/PageHeader";
 import { ReportCard } from "@/components/reportes/ReportCard";
-import { Wallet, Truck, Package, ShoppingCart, ArrowLeftRight, Lock, BarChart3, CalendarClock, CreditCard, TrendingUp } from "lucide-react";
+import { Wallet, Truck, Package, ShoppingCart, ArrowLeftRight, Lock, BarChart3, CalendarClock, CreditCard, TrendingUp, CalendarDays, Users } from "lucide-react";
 
 /** Hub de reportería operativa (Fase 1: Estado de cuenta + Proveedores). */
 export default function ReportesPage() {
@@ -31,6 +31,24 @@ export default function ReportesPage() {
             icon={ShoppingCart}
             description="Ventas del mes, desglose por tipo de precio (minorista/mayorista/al costo) y por producto."
             href="/reportes/ventas"
+          />
+        </li>
+        <li>
+          <ReportCard
+            title="Ventas por día"
+            subtitle="Total diario por fecha"
+            icon={CalendarDays}
+            description="Una fila por día con la cantidad de ventas y el total vendido (con desglose por medio de pago) en el rango elegido."
+            href="/reportes/diario"
+          />
+        </li>
+        <li>
+          <ReportCard
+            title="Ventas por vendedor"
+            subtitle="Para la comisión de fin de mes"
+            icon={Users}
+            description="Total vendido y comisión por vendedor del período. El porcentaje se edita ahí mismo."
+            href="/comisiones"
           />
         </li>
         <li>

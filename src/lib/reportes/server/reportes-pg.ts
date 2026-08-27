@@ -554,3 +554,72 @@ export async function getReporteRentabilidad(
     sin_costo_items: num(sinCostoQ.rows[0]?.n),
   };
 }
+
+// ── Reporte diario por fecha (ventas agrupadas por día, hora Asunción) ──────────
+
+export interface DiaVentasRow {
+  dia: string;      // YYYY-MM-DD
+  ventas: number;
+  total: number;
+  efectivo: number;
+  tarjeta: number;
+  transferencia: number;
+}
+export interface ReporteDiario {
+  desde: string;
+  hasta: string;
+  por_dia: DiaVentasRow[];
+  totales: { ventas: number; total: number; efectivo: number; tarjeta: number; transferencia: number };
+}
+
+export async function getReporteDiario(
+  schemaRaw: string,
+  empresaId: string,
+  desde: string,
+  hasta: string
+): Promise<ReporteDiario> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const tV = quoteSchemaTable(schema, "ventas");
+  const p = pool();
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(desde) ? desde : hasta;
+  const h = /^\d{4}-\d{2}-\d{2}$/.test(hasta) ? hasta : desde;
+
+  const { rows } = await p.query<{
+    dia: string; ventas: number; total: number; efectivo: number; tarjeta: number; transferencia: number;
+  }>(
+    `SELECT to_char((v.fecha AT TIME ZONE 'America/Asuncion')::date, 'YYYY-MM-DD') AS dia,
+            count(*)::int AS ventas,
+            COALESCE(SUM(v.total),0)::float8 AS total,
+            COALESCE(SUM(CASE WHEN v.metodo_pago = 'efectivo' THEN v.total ELSE 0 END),0)::float8 AS efectivo,
+            COALESCE(SUM(CASE WHEN v.metodo_pago = 'tarjeta' THEN v.total ELSE 0 END),0)::float8 AS tarjeta,
+            COALESCE(SUM(CASE WHEN v.metodo_pago = 'transferencia' THEN v.total ELSE 0 END),0)::float8 AS transferencia
+       FROM ${tV} v
+      WHERE v.empresa_id = $1::uuid
+        AND (v.fecha AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+        AND COALESCE(v.estado,'') NOT IN ('anulada','devuelta_total')
+      GROUP BY 1 ORDER BY 1`,
+    [empresaId, d, h]
+  );
+
+  const por_dia: DiaVentasRow[] = rows.map((r) => ({
+    dia: r.dia,
+    ventas: num(r.ventas),
+    total: Math.round(num(r.total)),
+    efectivo: Math.round(num(r.efectivo)),
+    tarjeta: Math.round(num(r.tarjeta)),
+    transferencia: Math.round(num(r.transferencia)),
+  }));
+
+  return {
+    desde: d,
+    hasta: h,
+    por_dia,
+    totales: {
+      ventas: por_dia.reduce((s, r) => s + r.ventas, 0),
+      total: por_dia.reduce((s, r) => s + r.total, 0),
+      efectivo: por_dia.reduce((s, r) => s + r.efectivo, 0),
+      tarjeta: por_dia.reduce((s, r) => s + r.tarjeta, 0),
+      transferencia: por_dia.reduce((s, r) => s + r.transferencia, 0),
+    },
+  };
+}

@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
     const ventasQ = await ctx.supabase
       .from("ventas")
       .select(
-        "id, empresa_id, numero_control, moneda, tipo_cambio, subtotal, monto_iva, total, tipo_venta, plazo_dias, metodo_pago, fecha, genera_nota_remision, nota_remision_numero, usuario_nombre, estado, anulada_at, anulada_motivo, factura_id, cliente_id, observaciones"
+        "id, empresa_id, numero_control, moneda, tipo_cambio, subtotal, monto_iva, total, tipo_venta, plazo_dias, metodo_pago, fecha, genera_nota_remision, nota_remision_numero, usuario_nombre, estado, anulada_at, anulada_motivo, factura_id, cliente_id, observaciones, vendedor_id, vendedor_nombre"
       )
       .eq("empresa_id", empresaId)
       .order("fecha", { ascending: false })
@@ -176,6 +176,8 @@ export async function GET(request: NextRequest) {
         cliente_id: r.cliente_id ?? null,
         cliente_nombre: r.cliente_id ? clienteNombreById.get(r.cliente_id) ?? null : null,
         observaciones: (r as unknown as { observaciones?: string | null }).observaciones ?? null,
+        vendedor_id: (r as unknown as { vendedor_id?: string | null }).vendedor_id ?? null,
+        vendedor_nombre: (r as unknown as { vendedor_nombre?: string | null }).vendedor_nombre ?? null,
         factura_id: r.factura_id ?? null,
         numero_factura: r.factura_id ? numeroFacturaByIdMap.get(r.factura_id) ?? null : null,
         factura_estado_sifen: r.factura_id ? estadoSifenByFacturaMap.get(r.factura_id) ?? null : null,

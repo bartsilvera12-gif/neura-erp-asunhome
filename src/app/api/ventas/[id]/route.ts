@@ -46,6 +46,12 @@ export async function PATCH(
       const d = new Date(String(b.fecha));
       if (!Number.isNaN(d.getTime())) patch.fecha = d.toISOString();
     }
+    // Vendedor acreditado para comisión (no toca stock/caja, solo el crédito de la venta).
+    if (b.vendedor_id !== undefined) {
+      patch.vendedor_id = b.vendedor_id === null || b.vendedor_id === "" ? null : String(b.vendedor_id);
+      patch.vendedor_nombre = b.vendedor_nombre != null && String(b.vendedor_nombre).trim()
+        ? String(b.vendedor_nombre).slice(0, 200) : null;
+    }
     if (Object.keys(patch).length === 0) {
       return NextResponse.json(errorResponse("No hay cambios para guardar."), { status: 400 });
     }

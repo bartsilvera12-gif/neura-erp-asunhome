@@ -589,6 +589,8 @@ function EditarVentaModal({
   const [clientes, setClientes] = useState<{ id: string; nombre: string }[]>([]);
   const [clienteId, setClienteId] = useState<string>(venta.cliente_id ?? "");
   const [observaciones, setObservaciones] = useState<string>(venta.observaciones ?? "");
+  const [vendedores, setVendedores] = useState<{ id: string; nombre: string }[]>([]);
+  const [vendedorId, setVendedorId] = useState<string>(venta.vendedor_id ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -602,6 +604,15 @@ function EditarVentaModal({
         setClientes(cs.map((c) => ({ id: c.id, nombre: clienteNombre(c) })));
       } catch {
         /* si falla, el selector queda con solo el cliente actual */
+      }
+      try {
+        const rv = await fetch("/api/comisiones/vendedores", { credentials: "include", cache: "no-store" });
+        const jv = await rv.json();
+        if (vivo && rv.ok && jv?.success && Array.isArray(jv.data?.vendedores)) {
+          setVendedores((jv.data.vendedores as { id: string; nombre: string }[]).map((v) => ({ id: v.id, nombre: v.nombre })));
+        }
+      } catch {
+        /* si falla, queda solo el vendedor actual */
       }
     })();
     return () => {
@@ -619,6 +630,8 @@ function EditarVentaModal({
         body: JSON.stringify({
           cliente_id: clienteId || null,
           observaciones: observaciones.trim() || null,
+          vendedor_id: vendedorId || null,
+          vendedor_nombre: vendedores.find((v) => v.id === vendedorId)?.nombre ?? null,
         }),
       });
       const json = await res.json();
@@ -652,7 +665,7 @@ function EditarVentaModal({
         <div className="border-b border-slate-100 bg-gradient-to-r from-[#4FAEB2]/5 to-transparent px-5 py-4">
           <h3 className="text-base font-bold text-slate-800">Editar venta {venta.numero_control}</h3>
           <p className="mt-1 text-xs text-slate-500">
-            Solo cambia el cliente y las observaciones. No modifica productos, cantidades ni montos.
+            Cambia el cliente, el vendedor y las observaciones. No modifica productos, cantidades ni montos.
           </p>
         </div>
         <div className="p-5 space-y-4">
@@ -667,6 +680,23 @@ function EditarVentaModal({
               />
             </div>
           </label>
+          {vendedores.length > 0 && (
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">Vendedor</span>
+              <div className="mt-1">
+                <FancySelect
+                  value={vendedorId}
+                  onChange={(v) => setVendedorId(v)}
+                  options={[
+                    { value: "", label: "— Sin vendedor —" },
+                    ...vendedores.map((v) => ({ value: v.id, label: v.nombre })),
+                  ]}
+                  placeholder="Elegir vendedor…"
+                />
+              </div>
+              <span className="mt-1 block text-[11px] text-slate-500">Cambia a quién se le acredita la comisión de esta venta.</span>
+            </label>
+          )}
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Observaciones</span>
             <textarea
