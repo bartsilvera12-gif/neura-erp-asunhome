@@ -583,11 +583,15 @@ export async function editarCompraCompleta(
     }
 
     // Revertir stock de las líneas viejas + borrar sus movimientos ENTRADA.
+    // IMPORTANTE: resta EXACTA (sin GREATEST/piso en 0). Si ya se vendió parte,
+    // el intermedio puede quedar negativo y la reinserción de más abajo lo vuelve
+    // a subir con las cantidades nuevas. Con un piso en 0 se perderían unidades
+    // (ej. compra 10 → venta 6 → editar a 6 daría 6 en vez de 0).
     for (const v of viejas) {
       const cant = Number(v.cantidad) || 0;
       if (cant > 0) {
         await client.query(
-          `UPDATE ${tP} SET stock_actual = GREATEST(0, stock_actual - $1::numeric), updated_at = now()
+          `UPDATE ${tP} SET stock_actual = stock_actual - $1::numeric, updated_at = now()
             WHERE id = $2::uuid AND empresa_id = $3::uuid`,
           [cant, v.producto_id, empresaId]
         );
