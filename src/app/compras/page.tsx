@@ -416,6 +416,20 @@ export default function ComprasPage() {
                 })
               )}
             </tbody>
+            {filtrados.length > 0 && (
+              <tfoot>
+                <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold text-gray-800">
+                  <td colSpan={4} className="py-3 pr-4 text-right text-sm">
+                    Total de compras <span className="font-normal text-gray-500">(sin anuladas)</span>
+                  </td>
+                  <td className="py-3 pr-4 text-right tabular-nums text-sm">
+                    {formatGs(filtrados.filter((g) => !g.anulada).reduce((s, g) => s + (g.total || 0), 0))}
+                  </td>
+                  <td className="hidden lg:table-cell" />
+                  <td colSpan={2} />
+                </tr>
+              </tfoot>
+            )}
           </table>
         </EdgeScrollArea>
 
