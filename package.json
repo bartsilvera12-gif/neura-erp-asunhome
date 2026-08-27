@@ -63,6 +63,7 @@
     "@supabase/supabase-js": "^2.99.0",
     "@types/nodemailer": "^8.0.1",
     "@xmldom/xmldom": "^0.9.9",
+    "exceljs": "^4.4.0",
     "fontkit": "^2.0.4",
     "framer-motion": "^12.36.0",
     "jszip": "^3.10.1",
