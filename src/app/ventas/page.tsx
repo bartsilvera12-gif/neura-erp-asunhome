@@ -353,7 +353,7 @@ export default function VentasPage() {
                           : "—"}
                       </td>
                       <td className="hidden py-4 pr-4 align-middle text-xs text-gray-600 lg:table-cell">
-                        {v.usuario_nombre ?? "—"}
+                        {v.vendedor_nombre ?? v.usuario_nombre ?? "—"}
                       </td>
                       <td className="py-4 pr-4 text-gray-500 text-xs tabular-nums align-middle">
                         {formatFecha(v.fecha)}
@@ -768,7 +768,7 @@ function VentaDetalleModal({ venta, onClose }: { venta: Venta; onClose: () => vo
         {/* Meta: fecha/hora, vendedor, tipo, pago */}
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-5 py-4 sm:grid-cols-4">
           <Meta label="Fecha y hora" value={formatFecha(venta.fecha)} />
-          <Meta label="Vendedor" value={venta.usuario_nombre ?? "—"} />
+          <Meta label="Vendedor" value={venta.vendedor_nombre ?? venta.usuario_nombre ?? "—"} />
           <Meta
             label="Tipo"
             value={venta.tipo_venta === "CONTADO" ? "Contado" : `Crédito ${venta.plazo_dias ?? ""}d`}
