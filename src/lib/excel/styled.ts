@@ -24,14 +24,26 @@ export const FMT = {
 
 const thin = (color = COLORS.border) => ({ style: "thin" as const, color: { argb: color } });
 
-/** Título grande combinado sobre `span` columnas en la fila `row`. */
+/**
+ * Título en la fila `row` (y, si hay subtítulo, en `row+1`) sobre `span` columnas.
+ * Cada uno en su propia fila combinada — evita que Excel muestre el texto pegado/cortado.
+ */
 export function addTitle(ws: ExcelJS.Worksheet, row: number, span: number, titulo: string, subtitulo?: string) {
   ws.mergeCells(row, 1, row, span);
   const c = ws.getCell(row, 1);
-  c.value = subtitulo ? `${titulo}\n${subtitulo}` : titulo;
+  c.value = titulo;
   c.font = { name: "Calibri", size: 15, bold: true, color: { argb: COLORS.accentDark } };
-  c.alignment = { vertical: "middle", horizontal: "left", wrapText: true };
-  ws.getRow(row).height = subtitulo ? 34 : 24;
+  c.alignment = { vertical: "middle", horizontal: "left" };
+  ws.getRow(row).height = 24;
+
+  if (subtitulo) {
+    ws.mergeCells(row + 1, 1, row + 1, span);
+    const s = ws.getCell(row + 1, 1);
+    s.value = subtitulo;
+    s.font = { name: "Calibri", size: 10, color: { argb: "FF6B7280" } };
+    s.alignment = { vertical: "middle", horizontal: "left" };
+    ws.getRow(row + 1).height = 16;
+  }
 }
 
 /** Da formato de encabezado (fila `row`) a `cols` columnas: fondo teal, texto blanco, bordes. */
