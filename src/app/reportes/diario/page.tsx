@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import PageHeader from "@/components/ui/PageHeader";
 import StatCard from "@/components/ui/StatCard";
 import RangoFechasSelector from "@/components/reportes/RangoFechasSelector";
+import ExportExcelButton from "@/components/ui/ExportExcelButton";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 import { mesActualAsuncion } from "@/lib/fechas/asuncion-bounds";
 
@@ -56,7 +57,10 @@ export default function ReporteDiarioPage() {
         backHref="/reportes"
         backLabel="Reportes"
         actions={
-          <RangoFechasSelector desde={desde} hasta={hasta} onChange={(r) => { setDesde(r.desde); setHasta(r.hasta); }} />
+          <div className="flex items-center gap-3">
+            <RangoFechasSelector desde={desde} hasta={hasta} onChange={(r) => { setDesde(r.desde); setHasta(r.hasta); }} />
+            <ExportExcelButton url={`/api/reportes/diario/export?desde=${desde}&hasta=${hasta}`} />
+          </div>
         }
       />
 

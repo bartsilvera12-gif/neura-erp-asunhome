@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
+import ExportExcelButton from "@/components/ui/ExportExcelButton";
 
 type Fila = {
   vendedor_id: string;
@@ -116,6 +117,7 @@ export default function ComisionesPage() {
           <button onClick={() => void cargar()} disabled={cargando} className="inline-flex items-center gap-1 rounded-md bg-[#4FAEB2] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#3F8E91] disabled:opacity-50">
             <RefreshCw className={`h-3.5 w-3.5 ${cargando ? "animate-spin" : ""}`} /> Actualizar
           </button>
+          <ExportExcelButton url={`/api/comisiones/reporte/export?desde=${rango.desde}&hasta=${rango.hasta}`} />
         </div>
       </div>
 
