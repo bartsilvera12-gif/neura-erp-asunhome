@@ -551,6 +551,7 @@ export async function editarCompraCompleta(
   const tCuo = quoteSchemaTable(schema, "compra_cuotas");
   const tPag = quoteSchemaTable(schema, "pagos_proveedores");
   const tProv = quoteSchemaTable(schema, "proveedores");
+  const tPP = quoteSchemaTable(schema, "proveedor_productos");
 
   if (!Array.isArray(items) || items.length === 0) throw new Error("La compra debe tener al menos un producto.");
 
@@ -558,8 +559,8 @@ export async function editarCompraCompleta(
   try {
     await client.query("BEGIN");
 
-    const { rows: viejas } = await client.query<{ producto_id: string; cantidad: string; estado: string }>(
-      `SELECT producto_id, cantidad::text, estado FROM ${tC}
+    const { rows: viejas } = await client.query<{ producto_id: string; producto_nombre: string; cantidad: string; costo_unitario: string; estado: string }>(
+      `SELECT producto_id, producto_nombre, cantidad::text, costo_unitario::text, estado FROM ${tC}
         WHERE empresa_id = $1::uuid AND numero_control = $2 AND anulada_at IS NULL
         FOR UPDATE`,
       [empresaId, numeroControl]
@@ -582,33 +583,97 @@ export async function editarCompraCompleta(
       }
     }
 
-    // Revertir stock de las líneas viejas + borrar sus movimientos ENTRADA.
-    // IMPORTANTE: resta EXACTA (sin GREATEST/piso en 0). Si ya se vendió parte,
-    // el intermedio puede quedar negativo y la reinserción de más abajo lo vuelve
-    // a subir con las cantidades nuevas. Con un piso en 0 se perderían unidades
-    // (ej. compra 10 → venta 6 → editar a 6 daría 6 en vez de 0).
+    // ── Ajuste por DIFERENCIA (no borra el movimiento original, no re-suma) ────
+    // Totales por producto: viejos vs nuevos. Solo se aplica el delta al stock y
+    // se registra un movimiento de ajuste por esa diferencia. Así, re-guardar sin
+    // cambios = delta 0 = stock intacto; y modificar 2→3 = solo +1.
+    const oldByProd = new Map<string, { qty: number; costo: number; nombre: string }>();
     for (const v of viejas) {
-      const cant = Number(v.cantidad) || 0;
-      if (cant > 0) {
+      const pid = String(v.producto_id);
+      const prev = oldByProd.get(pid);
+      const qty = Number(v.cantidad) || 0;
+      if (prev) prev.qty += qty;
+      else oldByProd.set(pid, { qty, costo: Number(v.costo_unitario) || 0, nombre: v.producto_nombre });
+    }
+    const newByProd = new Map<string, { qty: number; item: CompraItemInput }>();
+    for (const it of items) {
+      const pid = String(it.producto_id);
+      const prev = newByProd.get(pid);
+      if (prev) prev.qty += Number(it.cantidad) || 0;
+      else newByProd.set(pid, { qty: Number(it.cantidad) || 0, item: it });
+    }
+
+    const allPids = new Set<string>([...oldByProd.keys(), ...newByProd.keys()]);
+    for (const pid of allPids) {
+      const oldQty = oldByProd.get(pid)?.qty ?? 0;
+      const nw = newByProd.get(pid);
+      const newQty = nw?.qty ?? 0;
+      const delta = newQty - oldQty; // + entra stock, - sale stock
+      if (delta !== 0) {
         await client.query(
-          `UPDATE ${tP} SET stock_actual = stock_actual - $1::numeric, updated_at = now()
+          `UPDATE ${tP} SET stock_actual = stock_actual + $1::numeric, updated_at = now()
             WHERE id = $2::uuid AND empresa_id = $3::uuid`,
-          [cant, v.producto_id, empresaId]
+          [delta, pid, empresaId]
+        );
+        const costoMov = delta > 0 ? (nw?.item.costo_unitario ?? 0) : (oldByProd.get(pid)?.costo ?? 0);
+        const nombreMov = nw?.item.producto_nombre ?? oldByProd.get(pid)?.nombre ?? "";
+        await client.query(
+          `INSERT INTO ${tM} (
+             empresa_id, producto_id, producto_nombre, producto_sku,
+             tipo, cantidad, costo_unitario, origen, referencia, fecha, created_by, usuario_nombre
+           )
+           SELECT $1::uuid, $2::uuid, $3, COALESCE(p.sku, ''),
+                  $4, $5::numeric, $6::numeric, 'ajuste_manual', $7, now(), $8::uuid, $9
+             FROM ${tP} p WHERE p.id = $2::uuid`,
+          [empresaId, pid, nombreMov, delta > 0 ? "ENTRADA" : "SALIDA",
+           Math.abs(delta), costoMov, `EDIT-${numeroControl}`, header.created_by, header.usuario_nombre]
         );
       }
+      // Actualizar costo/precio del producto que sigue en la compra (last cost wins).
+      if (nw) {
+        await client.query(
+          `UPDATE ${tP}
+              SET costo_promedio = $1::numeric,
+                  precio_venta = CASE WHEN $2::numeric > 0 THEN $2::numeric ELSE precio_venta END,
+                  updated_at = now()
+            WHERE id = $3::uuid AND empresa_id = $4::uuid`,
+          [nw.item.costo_unitario, nw.item.precio_venta, pid, empresaId]
+        );
+        await upsertProveedorProducto(client, tPP, empresaId, pid, header.proveedor_id, nw.item.costo_unitario);
+      }
     }
-    await client.query(
-      `DELETE FROM ${tM} WHERE empresa_id = $1::uuid AND referencia = $2 AND tipo = 'ENTRADA'`,
-      [empresaId, numeroControl]
-    );
-    await client.query(`DELETE FROM ${tC} WHERE empresa_id = $1::uuid AND numero_control = $2`, [empresaId, numeroControl]);
 
-    // Reinsertar con el mismo numero_control (reaplica stock/costo/precio).
-    const out = await insertComprasConImpactoTx(
-      client, schema, empresaId,
-      { ...header, estado: estadoPrev, numero_control_existente: numeroControl },
-      items
-    );
+    // Reemplazar las FILAS de la compra (registro de la factura), SIN tocar stock
+    // ni crear otro movimiento (ya lo hizo el ajuste por diferencia de arriba).
+    await client.query(`DELETE FROM ${tC} WHERE empresa_id = $1::uuid AND numero_control = $2`, [empresaId, numeroControl]);
+    const insertedRows: CompraRow[] = [];
+    for (const it of items) {
+      const { rows: cr } = await client.query<CompraRow>(
+        `INSERT INTO ${tC} (
+           empresa_id, proveedor_id, proveedor_nombre, producto_id, producto_nombre,
+           cantidad, moneda, tipo_cambio, costo_unitario_original, costo_unitario,
+           iva_tipo, subtotal, monto_iva, total, precio_venta, margen_venta,
+           tipo_pago, plazo_dias, nro_timbrado, numero_factura, fecha_factura, observacion,
+           numero_control, estado, fecha, created_by, usuario_nombre
+         ) VALUES (
+           $1::uuid, $2::uuid, $3, $4::uuid, $5,
+           $6::numeric, $7, $8::numeric, $9::numeric, $10::numeric,
+           $11, $12::numeric, $13::numeric, $14::numeric, $15::numeric, $16::numeric,
+           $17, $18::integer, $19, $20, $21::date, $22,
+           $23, $24, COALESCE($25::timestamptz, now()), $26::uuid, $27
+         ) RETURNING ${COLS}`,
+        [
+          empresaId, header.proveedor_id, header.proveedor_nombre, it.producto_id, it.producto_nombre,
+          it.cantidad, header.moneda, header.tipo_cambio, it.costo_unitario_original, it.costo_unitario,
+          it.iva_tipo, it.subtotal, it.monto_iva, it.total, it.precio_venta, it.margen_venta,
+          header.tipo_pago, header.plazo_dias, header.nro_timbrado, header.numero_factura,
+          header.fecha_factura ?? null, header.observacion ?? null,
+          numeroControl, estadoPrev, header.fecha ?? null, header.created_by, header.usuario_nombre,
+        ]
+      );
+      insertedRows.push(cr[0]);
+    }
+    const out: ComprasMultiResult = { numero_control: numeroControl, compras: insertedRows, movimiento_warning: null };
 
     // Regenerar la cuenta por pagar si existía y la compra es definitiva.
     if (cxpRows.length > 0) {

@@ -633,6 +633,7 @@ export interface VentaDetalleLinea {
   cliente: string | null;
   vendedor_id: string | null;
   vendedor: string | null;
+  metodo_pago: string | null;
   producto: string;
   cantidad: number;
   precio_venta: number;
@@ -655,7 +656,7 @@ export async function getVentasDetalle(
 
   const { rows } = await pool().query<{
     fecha: string; numero_control: string; numero_factura: string | null; cliente: string | null;
-    vendedor_id: string | null; vendedor: string | null; producto: string;
+    vendedor_id: string | null; vendedor: string | null; metodo_pago: string | null; producto: string;
     cantidad: number; precio_venta: number; total: number;
   }>(
     `SELECT to_char((v.fecha AT TIME ZONE 'America/Asuncion'), 'YYYY-MM-DD HH24:MI') AS fecha,
@@ -664,6 +665,7 @@ export async function getVentasDetalle(
             cli.nombre AS cliente,
             v.vendedor_id::text AS vendedor_id,
             v.vendedor_nombre AS vendedor,
+            v.metodo_pago AS metodo_pago,
             vi.producto_nombre AS producto,
             vi.cantidad::float8 AS cantidad,
             vi.precio_venta::float8 AS precio_venta,
@@ -686,6 +688,7 @@ export async function getVentasDetalle(
     cliente: r.cliente ?? null,
     vendedor_id: r.vendedor_id ?? null,
     vendedor: r.vendedor ?? null,
+    metodo_pago: r.metodo_pago ?? null,
     producto: r.producto,
     cantidad: num(r.cantidad),
     precio_venta: Math.round(num(r.precio_venta)),
