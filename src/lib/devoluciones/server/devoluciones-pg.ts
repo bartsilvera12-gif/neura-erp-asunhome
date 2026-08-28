@@ -444,6 +444,36 @@ export async function crearDevolucion(
       );
     }
 
+    // ── 11a-bis) Actualizar el estado de los NÚMEROS DE SERIE devueltos.
+    // Para productos con series: los seriales de esta venta que estaban 'vendido'
+    // vuelven a 'en_stock' (si el estado es bueno, quedan re-vendibles y se limpia
+    // el vínculo de venta) o pasan a 'averiado' (si vino averiado/dañado, se conserva
+    // el historial de a qué cliente/venta pertenecía). Best-effort por ítem.
+    const tSER = quoteSchemaTable(schema, "producto_series");
+    for (const it of itemsCalc) {
+      const cant = Math.trunc(Number(it.cantidad_devuelta) || 0);
+      if (cant <= 0) continue;
+      const nuevoEstadoSerie = it.condicion === "buen_estado" ? "en_stock" : "averiado";
+      try {
+        await client.query(
+          `UPDATE ${tSER}
+              SET estado = $4,
+                  venta_id    = CASE WHEN $4 = 'en_stock' THEN NULL ELSE venta_id END,
+                  cliente_id  = CASE WHEN $4 = 'en_stock' THEN NULL ELSE cliente_id END,
+                  fecha_venta = CASE WHEN $4 = 'en_stock' THEN NULL ELSE fecha_venta END,
+                  updated_at = now()
+            WHERE id IN (
+              SELECT id FROM ${tSER}
+               WHERE empresa_id = $1::uuid AND producto_id = $2::uuid
+                 AND venta_id = $3::uuid AND estado = 'vendido'
+               ORDER BY fecha_venta DESC NULLS LAST
+               LIMIT ${cant}
+            )`,
+          [empresaId, it.producto_id, input.venta_id, nuevoEstadoSerie]
+        );
+      } catch { /* producto sin series o columna inexistente: no bloquea la devolución */ }
+    }
+
     // ── 11b) Registrar los ítems averiados en el módulo Averiados.
     // Loop propio: NO depende del reintegro de stock ni de si el producto
     // controla stock (antes estaba dentro del loop de stock y un `continue`
