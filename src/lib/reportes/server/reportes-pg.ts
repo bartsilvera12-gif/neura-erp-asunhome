@@ -623,3 +623,72 @@ export async function getReporteDiario(
     },
   };
 }
+
+// ── Detalle de líneas de venta (para desglose en Excel: producto, precio, factura) ──
+
+export interface VentaDetalleLinea {
+  fecha: string;            // YYYY-MM-DD HH:MI (Asunción)
+  numero_control: string;   // VTA-XXXXXX
+  numero_factura: string | null;
+  cliente: string | null;
+  vendedor_id: string | null;
+  vendedor: string | null;
+  producto: string;
+  cantidad: number;
+  precio_venta: number;
+  total: number;
+}
+
+export async function getVentasDetalle(
+  schemaRaw: string,
+  empresaId: string,
+  desde: string,
+  hasta: string
+): Promise<VentaDetalleLinea[]> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const tV = quoteSchemaTable(schema, "ventas");
+  const tVI = quoteSchemaTable(schema, "ventas_items");
+  const tF = quoteSchemaTable(schema, "facturas");
+  const tCli = quoteSchemaTable(schema, "clientes");
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(desde) ? desde : hasta;
+  const h = /^\d{4}-\d{2}-\d{2}$/.test(hasta) ? hasta : desde;
+
+  const { rows } = await pool().query<{
+    fecha: string; numero_control: string; numero_factura: string | null; cliente: string | null;
+    vendedor_id: string | null; vendedor: string | null; producto: string;
+    cantidad: number; precio_venta: number; total: number;
+  }>(
+    `SELECT to_char((v.fecha AT TIME ZONE 'America/Asuncion'), 'YYYY-MM-DD HH24:MI') AS fecha,
+            v.numero_control,
+            f.numero_factura,
+            cli.nombre AS cliente,
+            v.vendedor_id::text AS vendedor_id,
+            v.vendedor_nombre AS vendedor,
+            vi.producto_nombre AS producto,
+            vi.cantidad::float8 AS cantidad,
+            vi.precio_venta::float8 AS precio_venta,
+            vi.total_linea::float8 AS total
+       FROM ${tVI} vi
+       JOIN ${tV} v ON v.id = vi.venta_id
+       LEFT JOIN ${tF} f ON f.id = v.factura_id AND f.empresa_id = v.empresa_id
+       LEFT JOIN ${tCli} cli ON cli.id = v.cliente_id AND cli.empresa_id = v.empresa_id
+      WHERE v.empresa_id = $1::uuid
+        AND (v.fecha AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+        AND COALESCE(v.estado,'') NOT IN ('anulada','devuelta_total')
+      ORDER BY v.fecha, v.numero_control`,
+    [empresaId, d, h]
+  );
+
+  return rows.map((r) => ({
+    fecha: r.fecha,
+    numero_control: r.numero_control,
+    numero_factura: r.numero_factura ?? null,
+    cliente: r.cliente ?? null,
+    vendedor_id: r.vendedor_id ?? null,
+    vendedor: r.vendedor ?? null,
+    producto: r.producto,
+    cantidad: num(r.cantidad),
+    precio_venta: Math.round(num(r.precio_venta)),
+    total: Math.round(num(r.total)),
+  }));
+}

@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import ExcelJS from "exceljs";
 import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
-import { getReporteDiario } from "@/lib/reportes/server/reportes-pg";
+import { getReporteDiario, getVentasDetalle } from "@/lib/reportes/server/reportes-pg";
 import { xlsxResponseHeaders } from "@/lib/excel/export";
 import { addTitle, styleHeader, styleBody, styleTotals, FMT } from "@/lib/excel/styled";
 
@@ -57,6 +57,33 @@ export async function GET(request: NextRequest) {
     ws.getCell(totRow, 6).value = r.totales.total;
     styleTotals(ws, totRow, COLS.length);
     if (r.por_dia.length > 0) ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: lastData, column: COLS.length } };
+
+    // ── Hoja 2: Detalle por producto (desglose de cada línea de venta) ────────
+    const det = await getVentasDetalle(schema, ctx.auth.empresa_id, r.desde, r.hasta);
+    const DCOLS: { header: string; width: number; fmt?: string; value: (d: typeof det[number]) => string | number }[] = [
+      { header: "Fecha", width: 17, value: (d) => d.fecha },
+      { header: "N° venta", width: 13, value: (d) => d.numero_control },
+      { header: "N° factura", width: 14, value: (d) => d.numero_factura ?? "" },
+      { header: "Cliente", width: 24, value: (d) => d.cliente ?? "" },
+      { header: "Producto", width: 34, value: (d) => d.producto },
+      { header: "Cant.", width: 9, fmt: FMT.int, value: (d) => d.cantidad },
+      { header: "Precio venta", width: 15, fmt: FMT.money, value: (d) => d.precio_venta },
+      { header: "Total", width: 16, fmt: FMT.money, value: (d) => d.total },
+    ];
+    const wd = wb.addWorksheet("Detalle", {
+      views: [{ state: "frozen", ySplit: 3 }],
+      pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+    });
+    DCOLS.forEach((c, i) => { const col = wd.getColumn(i + 1); col.width = c.width; if (c.fmt) col.numFmt = c.fmt; });
+    addTitle(wd, 1, DCOLS.length, "Detalle de ventas por producto", `Del ${fFecha(r.desde)} al ${fFecha(r.hasta)}`);
+    DCOLS.forEach((c, i) => { wd.getCell(3, i + 1).value = c.header; });
+    styleHeader(wd, 3, DCOLS.length);
+    let dr = 4;
+    for (const d of det) { DCOLS.forEach((c, i) => { wd.getCell(dr, i + 1).value = c.value(d); }); dr++; }
+    if (det.length > 0) {
+      styleBody(wd, 4, dr - 1, DCOLS.length);
+      wd.autoFilter = { from: { row: 3, column: 1 }, to: { row: dr - 1, column: DCOLS.length } };
+    }
 
     const buf = await wb.xlsx.writeBuffer();
     return new Response(new Uint8Array(buf as ArrayBuffer), {
