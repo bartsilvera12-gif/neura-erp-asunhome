@@ -60,7 +60,10 @@ export async function GET(request: NextRequest) {
 
     // ── Hoja 2: Detalle por producto (desglose de cada línea de venta) ────────
     const det = await getVentasDetalle(schema, ctx.auth.empresa_id, r.desde, r.hasta);
-    const DCOLS: { header: string; width: number; fmt?: string; value: (d: typeof det[number]) => string | number }[] = [
+    // Monto de la línea bajo la columna de su medio de pago (para la caja diaria).
+    const porMedio = (d: typeof det[number], medio: string): number | string =>
+      d.metodo_pago === medio ? d.total : "";
+    const DCOLS: { header: string; width: number; fmt?: string; total?: boolean; value: (d: typeof det[number]) => string | number }[] = [
       { header: "Fecha", width: 17, value: (d) => d.fecha },
       { header: "N° venta", width: 13, value: (d) => d.numero_control },
       { header: "N° factura", width: 14, value: (d) => d.numero_factura ?? "" },
@@ -68,7 +71,10 @@ export async function GET(request: NextRequest) {
       { header: "Producto", width: 34, value: (d) => d.producto },
       { header: "Cant.", width: 9, fmt: FMT.int, value: (d) => d.cantidad },
       { header: "Precio venta", width: 15, fmt: FMT.money, value: (d) => d.precio_venta },
-      { header: "Total", width: 16, fmt: FMT.money, value: (d) => d.total },
+      { header: "Efectivo", width: 15, fmt: FMT.money, total: true, value: (d) => porMedio(d, "efectivo") },
+      { header: "Transferencia", width: 15, fmt: FMT.money, total: true, value: (d) => porMedio(d, "transferencia") },
+      { header: "Tarjeta", width: 15, fmt: FMT.money, total: true, value: (d) => porMedio(d, "tarjeta") },
+      { header: "Total", width: 16, fmt: FMT.money, total: true, value: (d) => d.total },
     ];
     const wd = wb.addWorksheet("Detalle", {
       views: [{ state: "frozen", ySplit: 3 }],
@@ -81,8 +87,17 @@ export async function GET(request: NextRequest) {
     let dr = 4;
     for (const d of det) { DCOLS.forEach((c, i) => { wd.getCell(dr, i + 1).value = c.value(d); }); dr++; }
     if (det.length > 0) {
-      styleBody(wd, 4, dr - 1, DCOLS.length);
-      wd.autoFilter = { from: { row: 3, column: 1 }, to: { row: dr - 1, column: DCOLS.length } };
+      const lastDet = dr - 1;
+      styleBody(wd, 4, lastDet, DCOLS.length);
+      wd.autoFilter = { from: { row: 3, column: 1 }, to: { row: lastDet, column: DCOLS.length } };
+      // Fila de totales por medio de pago + total general.
+      wd.getCell(dr, 1).value = "TOTALES";
+      DCOLS.forEach((c, i) => {
+        if (!c.total) return;
+        const suma = det.reduce((s, d) => { const v = c.value(d); return s + (typeof v === "number" ? v : 0); }, 0);
+        wd.getCell(dr, i + 1).value = suma;
+      });
+      styleTotals(wd, dr, DCOLS.length);
     }
 
     const buf = await wb.xlsx.writeBuffer();
