@@ -331,6 +331,16 @@ export default function NuevaCompraPage() {
     if (invalida) return setErrorSubmit(`Revisá "${invalida.producto_nombre}": la cantidad y el costo deben ser mayores a 0.`);
     const sinPrecio = lineas.find((l) => !l.es_insumo_no_vendible && l.precio_venta <= 0);
     if (sinPrecio) return setErrorSubmit(`Cargá el precio de venta de "${sinPrecio.producto_nombre}".`);
+    // Series: la cantidad de números de serie debe coincidir con la cantidad comprada.
+    for (const l of lineas) {
+      if (!l.maneja_series) continue;
+      const nSeries = l.series_texto.split(/\r?\n/).map((x) => x.trim()).filter(Boolean).length;
+      if (nSeries !== l.cantidad) {
+        return setErrorSubmit(
+          `"${l.producto_nombre}": cargaste ${nSeries} número(s) de serie para ${l.cantidad} unidad(es). Deben coincidir.`
+        );
+      }
+    }
 
     const proveedor = proveedores.find((p) => String(p.id) === cab.proveedor_id);
     if (!proveedor) return setErrorSubmit("Proveedor no encontrado. Recargá e intentá de nuevo.");
@@ -410,13 +420,26 @@ export default function NuevaCompraPage() {
       if (!res.success) { setErrorSubmit(res.error); return; }
       if (res.warning) alert(res.warning);
 
-      // Cargar los números de serie de las líneas que los manejan, ligados al
-      // proveedor de esta compra (best-effort: no bloquea el guardado).
+      // Cargar los números de serie ligados a la COMPRA (proveedor + factura + costo),
+      // para trazabilidad completa. Best-effort: no bloquea el guardado.
+      // Mapa producto → id de la fila de compra recién creada (para compra_id).
+      const compraIdByProducto = new Map<string, string>();
+      if (res.success) {
+        for (const c of res.compras) {
+          if (c.producto_id && c.id) compraIdByProducto.set(String(c.producto_id), String(c.id));
+        }
+      }
       const dup: string[] = [];
       for (const l of lineas) {
         if (!l.maneja_series || !l.series_texto.trim()) continue;
+        const compraId = compraIdByProducto.get(l.producto_id) ?? null;
         const nums = l.series_texto.split(/\r?\n/).map((x) => x.trim()).filter(Boolean)
-          .map((numero_serie) => ({ numero_serie, proveedor_id: String(proveedor.id) }));
+          .map((numero_serie) => ({
+            numero_serie,
+            proveedor_id: String(proveedor.id),
+            compra_id: compraId,
+            costo_unitario: l.costo_unitario_pyg || null,
+          }));
         if (nums.length === 0) continue;
         const rs = await cargarSeries(l.producto_id, nums);
         if (rs.ok) dup.push(...rs.data.duplicadas);

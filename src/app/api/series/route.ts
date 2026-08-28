@@ -54,9 +54,26 @@ export async function POST(request: NextRequest) {
     const productoId = typeof b.producto_id === "string" ? b.producto_id : "";
     if (!productoId) return NextResponse.json(errorResponse("Falta el producto."), { status: 400 });
     const raw = Array.isArray(b.series) ? b.series : [];
+    const toInput = (x: unknown): SerieInput | null => {
+      if (typeof x === "string") return { numero_serie: x };
+      if (!x || typeof x !== "object") return null;
+      const o = x as Record<string, unknown>;
+      if (typeof o.numero_serie !== "string") return null;
+      const s = (v: unknown) => (v == null || v === "" ? null : String(v));
+      const n = (v: unknown) => (v == null || v === "" ? null : Number(v));
+      return {
+        numero_serie: o.numero_serie,
+        proveedor_id: s(o.proveedor_id),
+        compra_id: s(o.compra_id),
+        costo_unitario: n(o.costo_unitario),
+        ubicacion_id: s(o.ubicacion_id),
+        observaciones: s(o.observaciones),
+        garantia_hasta: s(o.garantia_hasta),
+      };
+    };
     const series: SerieInput[] = raw
-      .map((x) => (typeof x === "string" ? { numero_serie: x } : (x as SerieInput)))
-      .filter((x) => x && typeof x.numero_serie === "string" && x.numero_serie.trim());
+      .map(toInput)
+      .filter((x): x is SerieInput => !!x && typeof x.numero_serie === "string" && x.numero_serie.trim() !== "");
     if (series.length === 0) return NextResponse.json(errorResponse("No hay series para cargar."), { status: 400 });
 
     const r = await insertSeries(c.schema, c.empresaId, productoId, series, c.userId);

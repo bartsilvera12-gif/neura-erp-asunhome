@@ -16,7 +16,10 @@ export interface Serie {
   proveedor_id: string | null;
   proveedor_nombre: string | null;
   compra_id: string | null;
+  compra_numero_control: string | null;
+  compra_fecha: string | null;
   venta_id: string | null;
+  venta_numero_control: string | null;
   cliente_id: string | null;
   cliente_nombre: string | null;
   costo_unitario: number | null;
@@ -67,6 +70,12 @@ export async function getSeriesDisponibles(productoId: string): Promise<Serie[]>
 export interface SerieNueva {
   numero_serie: string;
   proveedor_id?: string | null;
+  /** Factura de compra que trajo la unidad (id de la fila de compras). */
+  compra_id?: string | null;
+  /** Costo de adquisición de la unidad. */
+  costo_unitario?: number | null;
+  /** Depósito / sucursal. */
+  ubicacion_id?: string | null;
   observaciones?: string | null;
   garantia_hasta?: string | null;
 }

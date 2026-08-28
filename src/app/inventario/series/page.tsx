@@ -140,11 +140,15 @@ export default function SeriesPage() {
                         <tr className="border-t border-slate-100 bg-slate-50/40">
                           <td colSpan={5} className="px-4 py-4">
                             <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-xs sm:grid-cols-4">
+                              <Dato k="Factura de compra" v={s.compra_numero_control} />
+                              <Dato k="Fecha de compra" v={fmtFecha(s.compra_fecha ?? s.fecha_ingreso)} />
+                              <Dato k="Costo de compra" v={s.costo_unitario != null ? `Gs. ${Number(s.costo_unitario).toLocaleString("es-PY")}` : "—"} />
+                              <Dato k="Depósito" v={s.ubicacion_nombre} />
+                              <Dato k="Factura de venta" v={s.venta_numero_control} />
                               <Dato k="Cliente" v={s.cliente_nombre} />
                               <Dato k="Fecha de venta" v={fmtFecha(s.fecha_venta)} />
                               <Dato k="Precio de venta" v={s.precio_venta != null ? `Gs. ${Number(s.precio_venta).toLocaleString("es-PY")}` : "—"} />
                               <Dato k="Garantía hasta" v={fmtFecha(s.garantia_hasta)} />
-                              <Dato k="Costo" v={s.costo_unitario != null ? `Gs. ${Number(s.costo_unitario).toLocaleString("es-PY")}` : "—"} />
                               <Dato k="Observaciones" v={s.observaciones} full />
                             </div>
                           </td>

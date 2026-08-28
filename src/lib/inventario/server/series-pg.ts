@@ -31,7 +31,12 @@ export interface SerieRow {
   proveedor_id: string | null;
   proveedor_nombre: string | null;
   compra_id: string | null;
+  /** N° de la factura de compra que trajo la unidad (JOIN compras por compra_id). */
+  compra_numero_control: string | null;
+  compra_fecha: string | null;
   venta_id: string | null;
+  /** N° de la venta donde se vendió la unidad (JOIN ventas por venta_id). */
+  venta_numero_control: string | null;
   cliente_id: string | null;
   cliente_nombre: string | null;
   costo_unitario: number | null;
@@ -45,8 +50,9 @@ export interface SerieRow {
 const SEL = `
   s.id, s.producto_id, p.nombre AS producto_nombre, p.sku,
   s.numero_serie, s.estado, s.ubicacion_id, u.nombre AS ubicacion_nombre,
-  s.proveedor_id, pr.nombre AS proveedor_nombre, s.compra_id,
-  s.venta_id, s.cliente_id, cl.nombre AS cliente_nombre,
+  s.proveedor_id, pr.nombre AS proveedor_nombre,
+  s.compra_id, co.numero_control AS compra_numero_control, co.fecha AS compra_fecha,
+  s.venta_id, ve.numero_control AS venta_numero_control, s.cliente_id, cl.nombre AS cliente_nombre,
   s.costo_unitario, s.precio_venta, s.fecha_ingreso, s.fecha_venta,
   s.garantia_hasta, s.observaciones`;
 
@@ -57,7 +63,9 @@ function joins(schema: string): string {
     LEFT JOIN ${t("productos")} p               ON p.id = s.producto_id
     LEFT JOIN ${t("inventario_ubicaciones")} u  ON u.id = s.ubicacion_id
     LEFT JOIN ${t("proveedores")} pr            ON pr.id = s.proveedor_id
-    LEFT JOIN ${t("clientes")} cl               ON cl.id = s.cliente_id`;
+    LEFT JOIN ${t("clientes")} cl               ON cl.id = s.cliente_id
+    LEFT JOIN ${t("compras")} co                ON co.id = s.compra_id
+    LEFT JOIN ${t("ventas")} ve                 ON ve.id = s.venta_id`;
 }
 
 export interface ListSeriesOpts {
