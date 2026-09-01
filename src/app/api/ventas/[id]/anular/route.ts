@@ -164,6 +164,18 @@ export async function POST(
       if (eIns) throw new Error(eIns.message);
     }
 
+    // 4b) Liberar los números de serie de la venta: vuelven a "en_stock" y se
+    //     limpia el vínculo de venta, para que queden disponibles de nuevo.
+    //     Best-effort: no bloquea la anulación (productos sin series no afecta).
+    try {
+      await sb
+        .from("producto_series")
+        .update({ estado: "en_stock", venta_id: null, venta_item_id: null, cliente_id: null, fecha_venta: null })
+        .eq("empresa_id", empresaId)
+        .eq("venta_id", ventaId)
+        .eq("estado", "vendido");
+    } catch { /* sin series o error: la anulación continúa */ }
+
     // 5) Anular movimientos de caja vinculados a esta venta
     const { error: eCaja } = await sb
       .from("caja_movimientos")
