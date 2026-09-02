@@ -865,10 +865,21 @@ export default function NuevaCompraPage() {
                             className="w-14 rounded-md border border-slate-200 px-2 py-1.5 text-right text-sm outline-none focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20" />
                         </td>
                         <td className="py-2 px-2">
-                          <MontoInput value={l.costo_unitario_input}
-                            onChange={(n) => editarLinea(i, { costo_unitario_input: n })}
-                            decimals={cab.moneda === "USD"}
-                            className="w-24 rounded-md border border-slate-200 px-2 py-1.5 text-right text-sm outline-none focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20" />
+                          {cab.moneda === "USD" ? (
+                            // USD: input decimal nativo (evita que el formateo de miles se coma
+                            // los decimales; ej. USD 197.88 se ingresa limpio).
+                            <input
+                              type="number" min={0} step="0.01" inputMode="decimal"
+                              value={l.costo_unitario_input || ""}
+                              onChange={(e) => editarLinea(i, { costo_unitario_input: Number(e.target.value) || 0 })}
+                              placeholder="0.00"
+                              className="w-24 rounded-md border border-slate-200 px-2 py-1.5 text-right text-sm outline-none focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20" />
+                          ) : (
+                            <MontoInput value={l.costo_unitario_input}
+                              onChange={(n) => editarLinea(i, { costo_unitario_input: n })}
+                              decimals={false}
+                              className="w-24 rounded-md border border-slate-200 px-2 py-1.5 text-right text-sm outline-none focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20" />
+                          )}
                           {cab.moneda === "USD" && l.costo_unitario_pyg > 0 && (
                             <div className="mt-0.5 text-right text-[10px] text-gray-400">≈ {formatGs(l.costo_unitario_pyg)}</div>
                           )}
