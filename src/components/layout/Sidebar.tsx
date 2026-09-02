@@ -116,6 +116,8 @@ const MENU_STRUCTURE: MenuItem[] = [
   // Presupuestos: cotizaciones al cliente con PDF (logo + membrete Ferreteria
   // Republica). Reactivado a pedido.
   { key: "presupuestos", slug: "presupuestos", label: "Presupuestos", href: "/presupuestos", icon: FileText },
+  // Reservas / mercadería en guarda. Bajo slug `ventas` (ya activo) para acceso de admin y caja.
+  { key: "reservas", slug: "ventas", label: "Reservas / Guarda", href: "/reservas", icon: FileText },
   // Items gastro/legacy ocultados para ferreteria (codigo conservado por si se reactivan):
   // - Pedidos (proyectos): kanban de cocina, no aplica.
   // - Recetas: combos/insumos, no aplica.
