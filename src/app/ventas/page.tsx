@@ -99,6 +99,21 @@ export default function VentasPage() {
   const [reloadKey, setReloadKey] = useState(0);
   const [devolucionesOn, setDevolucionesOn] = useState(false);
   const [devolverVentaId, setDevolverVentaId] = useState<string | null>(null);
+  // El usuario Armando (armando@admin.com) no edita ventas: se le oculta el botón "Editar".
+  const [ocultarEditar, setOcultarEditar] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/usuarios/me", { credentials: "include", cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled) return;
+        const email = String(j?.usuario?.email ?? "").trim().toLowerCase();
+        setOcultarEditar(email === "armando@admin.com");
+      })
+      .catch(() => { if (!cancelled) setOcultarEditar(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -405,7 +420,7 @@ export default function VentasPage() {
                               Nota de remisión
                             </a>
                           )}
-                          {!isAnulada && (
+                          {!isAnulada && !ocultarEditar && (
                             <button
                               type="button"
                               onClick={() => setEditarTarget(v)}
