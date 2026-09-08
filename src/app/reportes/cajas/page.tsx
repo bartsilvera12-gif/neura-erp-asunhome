@@ -7,8 +7,10 @@ import PageHeader from "@/components/ui/PageHeader";
 import StatCard from "@/components/ui/StatCard";
 import ExportExcelButton from "@/components/ui/ExportExcelButton";
 import RangoFechasSelector from "@/components/reportes/RangoFechasSelector";
+import ResumenCajaCard from "@/components/reportes/ResumenCajaCard";
 import { getCajasReporte } from "@/lib/reportes/storage";
 import { mesActualAsuncion } from "@/lib/fechas/asuncion-bounds";
+import { calcularResumenCaja } from "@/lib/caja/resumen-caja";
 import type { CajasReporte } from "@/lib/caja/types";
 
 function formatGs(v: number) {
@@ -50,6 +52,8 @@ export default function CajasReportePage() {
   const t = data?.totales;
   const numerosCajas = [...new Set((data?.cajas ?? []).map((c) => c.numero_caja))].sort((a, b) => a - b);
   const cajasFiltradas = (data?.cajas ?? []).filter((c) => filtroCaja === "" || c.numero_caja === filtroCaja);
+  // Resumen de Caja del período (respeta el filtro por número de caja).
+  const resumenCaja = calcularResumenCaja(cajasFiltradas);
 
   return (
     <div className="space-y-8">
@@ -96,6 +100,8 @@ export default function CajasReportePage() {
             <StatCard compact label="Diferencia neta" value={formatGs(t.total_diferencia)} hint={`${t.cajas_con_diferencia} caja(s) con diferencia`} />
             <StatCard compact label="Faltantes / Sobrantes" value={`${formatGs(t.faltantes)} / ${formatGs(t.sobrantes)}`} hint="faltante / sobrante acumulado" />
           </div>
+
+          <ResumenCajaCard resumen={resumenCaja} desde={desde} hasta={hasta} />
 
           <div className="rounded-2xl border border-[#4FAEB2]/30 bg-white p-6 shadow-sm ring-1 ring-[#4FAEB2]/10">
             <h2 className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700">

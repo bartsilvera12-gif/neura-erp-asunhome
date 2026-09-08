@@ -3,6 +3,9 @@ import ExcelJS from "exceljs";
 import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import { getReporteDiario, getVentasDetalle } from "@/lib/reportes/server/reportes-pg";
+import { getReporteCajas } from "@/lib/caja/server";
+import { resolverRangoCajas } from "@/lib/caja/reporte-rango";
+import { calcularResumenCaja, etiquetaEstadoDiferencia } from "@/lib/caja/resumen-caja";
 import { xlsxResponseHeaders } from "@/lib/excel/export";
 import { addTitle, styleHeader, styleBody, styleTotals, FMT } from "@/lib/excel/styled";
 
@@ -99,6 +102,39 @@ export async function GET(request: NextRequest) {
       });
       styleTotals(wd, dr, DCOLS.length);
     }
+
+    // ── Hoja 3: Resumen de Caja (efectivo esperado vs. real contado) ─────────
+    // Se calcula desde los turnos de caja del mismo rango (misma lógica que la
+    // pantalla), para que el Excel coincida con lo que ve el usuario.
+    const cajasRep = await getReporteCajas(ctx.supabase, ctx.auth.empresa_id, resolverRangoCajas(r.desde, r.hasta));
+    const rc = calcularResumenCaja(cajasRep.cajas);
+    const rcs = wb.addWorksheet("Resumen de Caja");
+    rcs.getColumn(1).width = 26;
+    rcs.getColumn(2).width = 20;
+    addTitle(rcs, 1, 2, "Resumen de Caja", `Del ${fFecha(r.desde)} al ${fFecha(r.hasta)}`);
+    rcs.getCell(3, 1).value = "Concepto";
+    rcs.getCell(3, 2).value = "Valor";
+    styleHeader(rcs, 3, 2);
+    const rcRows: [string, number | string, boolean][] = [
+      ["Saldo inicial", rc.saldo_inicial, true],
+      ["Ventas en efectivo", rc.ventas_efectivo, true],
+      ["Otros ingresos", rc.otros_ingresos, true],
+      ["Egresos", rc.egresos, true],
+      ["Saldo esperado", rc.saldo_esperado, true],
+      ["Efectivo real", rc.efectivo_real == null ? "Sin cierre" : rc.efectivo_real, rc.efectivo_real != null],
+      ["Diferencia", rc.diferencia == null ? "—" : rc.diferencia, rc.diferencia != null],
+      ["Estado", etiquetaEstadoDiferencia(rc.estado), false],
+    ];
+    let rcr = 4;
+    for (const [concepto, valor, money] of rcRows) {
+      rcs.getCell(rcr, 1).value = concepto;
+      const vc = rcs.getCell(rcr, 2);
+      vc.value = valor;
+      if (money) vc.numFmt = FMT.money;
+      rcr++;
+    }
+    styleBody(rcs, 4, rcr - 1, 2);
+    rcs.getColumn(2).alignment = { horizontal: "right" };
 
     const buf = await wb.xlsx.writeBuffer();
     return new Response(new Uint8Array(buf as ArrayBuffer), {

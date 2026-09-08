@@ -6,8 +6,11 @@ import PageHeader from "@/components/ui/PageHeader";
 import StatCard from "@/components/ui/StatCard";
 import RangoFechasSelector from "@/components/reportes/RangoFechasSelector";
 import ExportExcelButton from "@/components/ui/ExportExcelButton";
+import ResumenCajaCard from "@/components/reportes/ResumenCajaCard";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 import { mesActualAsuncion } from "@/lib/fechas/asuncion-bounds";
+import { getCajasReporte } from "@/lib/reportes/storage";
+import { calcularResumenCaja, type ResumenCaja } from "@/lib/caja/resumen-caja";
 
 type Dia = { dia: string; ventas: number; total: number; efectivo: number; tarjeta: number; transferencia: number };
 type DetalleLinea = {
@@ -40,16 +43,23 @@ export default function ReporteDiarioPage() {
   const [desde, setDesde] = useState(`${mesActualAsuncion()}-01`);
   const [hasta, setHasta] = useState(hoy());
   const [data, setData] = useState<Reporte | null>(null);
+  const [resumenCaja, setResumenCaja] = useState<ResumenCaja | null>(null);
   const [cargando, setCargando] = useState(true);
 
   const cargar = useCallback(async () => {
     setCargando(true);
     try {
-      const r = await fetchWithSupabaseSession(`/api/reportes/diario?desde=${desde}&hasta=${hasta}`, { cache: "no-store" });
-      const j = await r.json();
+      // En paralelo: ventas por día (existente) + turnos de caja del mismo rango
+      // (para el Resumen de Caja: efectivo esperado vs. real contado).
+      const [j, cajas] = await Promise.all([
+        fetchWithSupabaseSession(`/api/reportes/diario?desde=${desde}&hasta=${hasta}`, { cache: "no-store" }).then((r) => r.json()),
+        getCajasReporte(desde, hasta),
+      ]);
       setData(j?.data ?? null);
+      setResumenCaja(cajas ? calcularResumenCaja(cajas.cajas) : null);
     } catch {
       setData(null);
+      setResumenCaja(null);
     } finally {
       setCargando(false);
     }
@@ -84,6 +94,8 @@ export default function ReporteDiarioPage() {
             <StatCard compact label="Ventas" value={String(data.totales.ventas)} />
             <StatCard compact accent label="Total vendido" value={formatGs(data.totales.total)} />
           </div>
+
+          {resumenCaja && <ResumenCajaCard resumen={resumenCaja} desde={data.desde} hasta={data.hasta} />}
 
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="overflow-x-auto">

@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
 import { getReporteCajas } from "@/lib/caja/server";
 import { resolverRangoCajas } from "@/lib/caja/reporte-rango";
+import { calcularResumenCaja, etiquetaEstadoDiferencia } from "@/lib/caja/resumen-caja";
 import { xlsxResponseHeaders } from "@/lib/excel/export";
 import { addTitle, styleHeader, styleBody, styleTotals, FMT } from "@/lib/excel/styled";
 
@@ -130,6 +131,36 @@ export async function GET(request: NextRequest) {
       rr++;
     }
     styleBody(rs, 4, rr - 1, 2);
+    rs.getColumn(2).alignment = { horizontal: "right" };
+
+    // ── Resumen de Caja (efectivo esperado vs. real contado) ─────────────────
+    const rc = calcularResumenCaja(r.cajas);
+    rr += 1; // fila en blanco separadora
+    addTitle(rs, rr, 2, "Resumen de Caja", "Efectivo esperado vs. real contado");
+    rr += 2;
+    rs.getCell(rr, 1).value = "Concepto";
+    rs.getCell(rr, 2).value = "Valor";
+    styleHeader(rs, rr, 2);
+    rr += 1;
+    const rcInicio = rr;
+    const rcRows: [string, number | string, boolean][] = [
+      ["Saldo inicial", rc.saldo_inicial, true],
+      ["Ventas en efectivo", rc.ventas_efectivo, true],
+      ["Otros ingresos", rc.otros_ingresos, true],
+      ["Egresos", rc.egresos, true],
+      ["Saldo esperado", rc.saldo_esperado, true],
+      ["Efectivo real", rc.efectivo_real == null ? "Sin cierre" : rc.efectivo_real, rc.efectivo_real != null],
+      ["Diferencia", rc.diferencia == null ? "—" : rc.diferencia, rc.diferencia != null],
+      ["Estado", etiquetaEstadoDiferencia(rc.estado), false],
+    ];
+    for (const [concepto, valor, money] of rcRows) {
+      rs.getCell(rr, 1).value = concepto;
+      const vc = rs.getCell(rr, 2);
+      vc.value = valor;
+      if (money) vc.numFmt = FMT.money;
+      rr++;
+    }
+    styleBody(rs, rcInicio, rr - 1, 2);
     rs.getColumn(2).alignment = { horizontal: "right" };
 
     const buf = await wb.xlsx.writeBuffer();
