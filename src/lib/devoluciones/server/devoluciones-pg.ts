@@ -568,13 +568,24 @@ export async function crearDevolucion(
 
 // ── Anulacion (movimientos inversos, tambien transaccional) ─────────────────
 
-export async function anularDevolucion(
+/**
+ * Núcleo de la anulación de una devolución ejecutado sobre un pg Client EXTERNO
+ * (NO abre/cierra su propia transacción). Permite anular devolución + venta en
+ * UNA sola transacción atómica (ver anularVentaPg): todos los reversos usan el
+ * MISMO `client`, así "o se anula todo, o no se anula nada".
+ *
+ * Idempotente: si la devolución ya está anulada, es no-op (no revierte de nuevo)
+ * y devuelve `{ yaAnulada: true }` — no lanza, para no romper la transacción del
+ * caller. Sí lanza si la devolución no existe.
+ */
+export async function anularDevolucionConClient(
+  client: import("pg").PoolClient,
   schemaRaw: string,
   empresaId: string,
   usuario: UsuarioCtx,
   devolucionId: string,
   motivo: string | null
-): Promise<Devolucion> {
+): Promise<{ yaAnulada: boolean; ventaId: string | null }> {
   const schema = assertAllowedChatDataSchema(schemaRaw);
   const tD = quoteSchemaTable(schema, "devoluciones_venta");
   const tDI = quoteSchemaTable(schema, "devoluciones_venta_items");
@@ -585,10 +596,7 @@ export async function anularDevolucion(
   const tMI = quoteSchemaTable(schema, "movimientos_inventario");
   const tCM = quoteSchemaTable(schema, "caja_movimientos");
 
-  const client = await pool().connect();
-  try {
-    await client.query("BEGIN");
-
+  {
     const dQ = await client.query(
       `SELECT id::text, numero_devolucion, venta_id::text AS venta_id, estado, diferencia,
               metodo_reembolso, caja_id::text AS caja_id
@@ -598,7 +606,8 @@ export async function anularDevolucion(
     const d = dQ.rows[0];
     if (!d) throw new DevolucionBloqueadaError("devolucion_no_encontrada", "La devolución no existe.");
     if (String(d.estado) === "anulada") {
-      throw new DevolucionBloqueadaError("devolucion_ya_anulada", "La devolución ya está anulada.");
+      // Idempotente: ya anulada → no-op (no se revierte stock ni movimientos otra vez).
+      return { yaAnulada: true, ventaId: str(d.venta_id) };
     }
     const numero = String(d.numero_devolucion);
 
@@ -714,6 +723,31 @@ export async function anularDevolucion(
       [String(d.venta_id), empresaId, estadoVenta]
     );
 
+    return { yaAnulada: false, ventaId: str(d.venta_id) };
+  }
+}
+
+/**
+ * Anula una devolución (endpoint standalone): abre su PROPIA transacción y
+ * delega el reverso en anularDevolucionConClient. Conserva el comportamiento de
+ * lanzar si la devolución ya estaba anulada.
+ */
+export async function anularDevolucion(
+  schemaRaw: string,
+  empresaId: string,
+  usuario: UsuarioCtx,
+  devolucionId: string,
+  motivo: string | null
+): Promise<Devolucion> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const client = await pool().connect();
+  try {
+    await client.query("BEGIN");
+    const r = await anularDevolucionConClient(client, schemaRaw, empresaId, usuario, devolucionId, motivo);
+    if (r.yaAnulada) {
+      await client.query("ROLLBACK");
+      throw new DevolucionBloqueadaError("devolucion_ya_anulada", "La devolución ya está anulada.");
+    }
     await client.query("COMMIT");
     const dev = await getDevolucion(schema, empresaId, devolucionId);
     if (!dev) throw new Error("No se pudo leer la devolución anulada.");

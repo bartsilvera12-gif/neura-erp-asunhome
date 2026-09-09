@@ -103,6 +103,8 @@ export async function saveVenta(
     cajaId?: string | null;
     /** Si esta seteado (2+ items), es pago mixto: se ignora pagoDetalle. */
     pagos?: PagoLinea[] | null;
+    /** Clave de idempotencia por intento de checkout (doble-click/timeout/retry). */
+    idempotencyKey?: string | null;
   }
 ): Promise<ResultadoGuardarVenta> {
   if (!datos.items || datos.items.length === 0) {
@@ -137,6 +139,7 @@ export async function saveVenta(
         pedido_id: opts?.pedidoId ?? null,
         pedido_caja_id: opts?.pedidoCajaId ?? null,
         caja_id: opts?.cajaId ?? null,
+        idempotency_key: opts?.idempotencyKey ?? null,
       }),
     });
 

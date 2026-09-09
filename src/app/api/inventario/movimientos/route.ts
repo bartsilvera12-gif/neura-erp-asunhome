@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     let query = ctx.supabase
       .from("movimientos_inventario")
       .select(
-        "id, empresa_id, producto_id, producto_nombre, producto_sku, tipo, cantidad, costo_unitario, origen, referencia, fecha, created_at, updated_at, created_by, usuario_nombre",
+        "id, empresa_id, producto_id, producto_nombre, producto_sku, tipo, cantidad, costo_unitario, origen, referencia, fecha, created_at, updated_at, created_by, usuario_nombre, venta_id, anulado_at",
         { count: "planned" }
       )
       .eq("empresa_id", empresaId);

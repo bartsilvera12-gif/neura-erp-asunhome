@@ -111,6 +111,13 @@ export interface CreateVentaPgParams {
    * cliente, no se rompe la venta: se devuelve `facturaWarning` y queda como ticket.
    */
   emitirFactura?: boolean;
+  /**
+   * Clave de idempotencia por request (doble-click / timeout / retry). Si ya
+   * existe una venta con esta clave para la empresa, se devuelve ESA venta sin
+   * crear otra (`deduped: true`). El índice único parcial
+   * `ventas_uq_idempotency_key` garantiza el dedupe incluso ante race real.
+   */
+  idempotencyKey?: string | null;
 }
 
 function recalcTotals(items: CreateVentaItemInput[]) {
@@ -154,6 +161,8 @@ export async function createVentaTransaccionalPg(
   facturaId?: string | null;
   numeroFactura?: string | null;
   facturaWarning?: string | null;
+  /** true si se devolvió una venta ya existente por idempotencia (no se creó otra). */
+  deduped?: boolean;
 }> {
   const items = params.items;
   if (!items.length) {
@@ -170,6 +179,48 @@ export async function createVentaTransaccionalPg(
   }
 
   const sb = createServiceRoleClientWithDbSchema(params.schema);
+
+  // ── Idempotencia: si ya existe una venta con esta clave, devolverla sin crear
+  // otra (protege doble-click / timeout / retry). El índice único parcial cierra
+  // la ventana de carrera; acá hacemos el camino rápido de lectura.
+  const idemKey = params.idempotencyKey?.trim() || null;
+  async function buildDeduped(row: {
+    id: string; numero_control: string; fecha: string;
+    nota_remision_numero: string | null; factura_id: string | null;
+  }) {
+    let numeroFactura: string | null = null;
+    if (row.factura_id) {
+      const fq = await sb
+        .from("facturas")
+        .select("numero_factura")
+        .eq("id", row.factura_id)
+        .eq("empresa_id", params.empresaId)
+        .maybeSingle();
+      numeroFactura = (fq.data as { numero_factura?: string } | null)?.numero_factura ?? null;
+    }
+    return {
+      ventaId: row.id,
+      numeroControl: row.numero_control,
+      fechaIso: row.fecha,
+      notaRemisionNumero: row.nota_remision_numero ?? null,
+      cuentaPorCobrarId: null as string | null,
+      facturaId: row.factura_id ?? null,
+      numeroFactura,
+      facturaWarning: null as string | null,
+      deduped: true as const,
+    };
+  }
+  if (idemKey) {
+    const dup = await sb
+      .from("ventas")
+      .select("id, numero_control, fecha, nota_remision_numero, factura_id")
+      .eq("empresa_id", params.empresaId)
+      .eq("idempotency_key", idemKey)
+      .maybeSingle();
+    if (!dup.error && dup.data) {
+      return buildDeduped(dup.data as Parameters<typeof buildDeduped>[0]);
+    }
+  }
 
   // ---------------------------------------------------------------------
   // Resolver presentaciones para cada item ANTES de validar stock.
@@ -587,10 +638,26 @@ export async function createVentaTransaccionalPg(
       usuario_nombre: params.usuarioNombre ?? null,
       vendedor_id: params.vendedorId ?? null,
       vendedor_nombre: params.vendedorNombre ?? null,
+      idempotency_key: idemKey,
     })
     .select("id")
     .single();
-  if (insVenta.error) throw new Error(insVenta.error.message);
+  if (insVenta.error) {
+    // Carrera real: otro request con la misma clave insertó primero. El índice
+    // único `ventas_uq_idempotency_key` lo rechaza acá; devolvemos ESA venta.
+    if (idemKey && /ventas_uq_idempotency_key|idempotency/i.test(insVenta.error.message)) {
+      const dup = await sb
+        .from("ventas")
+        .select("id, numero_control, fecha, nota_remision_numero, factura_id")
+        .eq("empresa_id", params.empresaId)
+        .eq("idempotency_key", idemKey)
+        .maybeSingle();
+      if (!dup.error && dup.data) {
+        return buildDeduped(dup.data as Parameters<typeof buildDeduped>[0]);
+      }
+    }
+    throw new Error(insVenta.error.message);
+  }
   const ventaId = String((insVenta.data as { id: string }).id);
 
   // Helper de rollback best-effort

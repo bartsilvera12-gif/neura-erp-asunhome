@@ -158,6 +158,10 @@ export default function NuevaVentaPage() {
   // inmediato (React puede tardar en aplicar el estado; el ref corta el segundo disparo ya).
   const [guardando, setGuardando] = useState(false);
   const isSubmittingRef = useRef(false);
+  // Idempotencia: clave estable por intento de checkout. Se genera al primer
+  // envío y se reusa en reintentos (incluido "confirmar sin stock"); se renueva
+  // recién tras un alta exitosa. Así un retry por timeout no crea una 2ª venta.
+  const idempotencyKeyRef = useRef<string | null>(null);
 
   // Facturación de un pedido enviado a Caja (?pedido_id=...). Precarga items + cliente.
   const [pedidoId, setPedidoId] = useState<string | null>(null);
@@ -987,6 +991,9 @@ export default function NuevaVentaPage() {
           pedidoCajaId,
           cajaId: cajaActivaFinal,
           pagos: pagosArrayFinal,
+          // Se reusa la misma clave en reintentos del mismo checkout.
+          idempotencyKey:
+            idempotencyKeyRef.current || (idempotencyKeyRef.current = crypto.randomUUID()),
         }
       );
 
@@ -1001,6 +1008,9 @@ export default function NuevaVentaPage() {
         setErrorVenta(resultado.error);
         return;
       }
+      // Alta exitosa: renovar la clave para que la PRÓXIMA venta sea una
+      // operación nueva (no se deduplica contra ésta).
+      idempotencyKeyRef.current = null;
       // Puente venta→factura (SIFEN): si el cajero eligió "Factura" y el backend
       // creó la factura ERP, saltamos directo al panel /facturas/[id]?auto=1 que
       // arranca el pipeline SIFEN (borrador → firma → envío → KUDE). Si el puente

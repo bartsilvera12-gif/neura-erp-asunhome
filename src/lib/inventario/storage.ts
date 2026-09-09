@@ -72,6 +72,8 @@ interface MovimientoRow {
   updated_at: string;
   created_by?: string | null;
   usuario_nombre?: string | null;
+  venta_id?: string | null;
+  anulado_at?: string | null;
 }
 
 // ─── Mapeo fila → tipo ────────────────────────────────────────────────────────
@@ -137,6 +139,8 @@ function rowToMovimiento(row: MovimientoRow): MovimientoInventario {
     fecha: row.fecha,
     created_by: row.created_by ?? null,
     usuario_nombre: row.usuario_nombre ?? null,
+    venta_id: row.venta_id ?? null,
+    anulado_at: row.anulado_at ?? null,
   };
 }
 

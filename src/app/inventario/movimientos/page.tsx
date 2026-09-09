@@ -23,6 +23,12 @@ import type {
   TipoMovimiento,
   OrigenMovimiento,
 } from "@/lib/inventario/types";
+import {
+  ORIGEN_LABEL,
+  origenLabel,
+  origenBadgeClass,
+  operacionLabel,
+} from "@/lib/inventario/movimiento-operacion";
 
 // Badges con paleta del sistema (turquesa + colores semanticos suaves)
 const tipoBadge: Record<TipoMovimiento, string> = {
@@ -36,20 +42,9 @@ const TipoIcon = {
   AJUSTE: Pencil,
 } as const;
 
-const origenLabel: Record<OrigenMovimiento, string> = {
-  compra: "Compra",
-  venta: "Venta",
-  ajuste_manual: "Ajuste manual",
-  inventario_inicial: "Inventario inicial",
-  devolucion_venta: "Devolución venta",
-};
-const origenBadge: Record<OrigenMovimiento, string> = {
-  compra: "bg-sky-50 text-sky-700 border border-sky-200",
-  venta: "bg-violet-50 text-violet-700 border border-violet-200",
-  ajuste_manual: "bg-slate-100 text-slate-600 border border-slate-200",
-  inventario_inicial: "bg-orange-50 text-orange-700 border border-orange-200",
-  devolucion_venta: "bg-amber-50 text-amber-800 border border-amber-200",
-};
+// Etiquetas/badges de origen y de operación viven en un helper puro y cubren
+// los 13 orígenes reales (antes solo se contemplaban 5, por eso las guardas
+// aparecían con el origen en blanco). Ver @/lib/inventario/movimiento-operacion.
 
 function formatGs(valor: number) {
   return `Gs. ${valor.toLocaleString("es-PY")}`;
@@ -231,10 +226,11 @@ export default function MovimientosPage() {
               className={`${inputClass} md:col-span-4`}
             >
               <option value="">Todos los orígenes</option>
-              <option value="compra">Compra</option>
-              <option value="venta">Venta</option>
-              <option value="ajuste_manual">Ajuste manual</option>
-              <option value="inventario_inicial">Inventario inicial</option>
+              {(Object.keys(ORIGEN_LABEL) as OrigenMovimiento[]).map((o) => (
+                <option key={o} value={o}>
+                  {ORIGEN_LABEL[o]}
+                </option>
+              ))}
             </select>
           </div>
           <div className="mt-3 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
@@ -288,6 +284,7 @@ export default function MovimientosPage() {
                   Costo unit.
                 </th>
                 <th className="hidden md:table-cell px-3 py-3 font-semibold">Origen</th>
+                <th className="px-3 py-3 font-semibold">Operación</th>
                 <th className="hidden lg:table-cell px-3 py-3 font-semibold">Usuario</th>
                 <th className="px-3 py-3 font-semibold">Fecha</th>
               </tr>
@@ -295,13 +292,13 @@ export default function MovimientosPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400 text-sm">
+                  <td colSpan={9} className="py-12 text-center text-slate-400 text-sm">
                     Cargando...
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-16 text-center">
+                  <td colSpan={9} className="py-16 text-center">
                     <div className="inline-flex items-center justify-center h-14 w-14 rounded-2xl bg-[#4FAEB2]/8 border border-[#4FAEB2]/20 mb-3">
                       <Package className="h-6 w-6 text-[#4FAEB2]" />
                     </div>
@@ -337,9 +334,10 @@ export default function MovimientosPage() {
                       : m.tipo === "SALIDA"
                       ? "text-red-600"
                       : "text-amber-700";
+                  const anulado = !!m.anulado_at;
 
                   return (
-                    <tr key={m.id} className="hover:bg-[#4FAEB2]/3 transition-colors">
+                    <tr key={m.id} className={`transition-colors ${anulado ? "bg-slate-50/60 hover:bg-slate-100/60" : "hover:bg-[#4FAEB2]/3"}`}>
                       <td className="px-5 py-3.5 font-semibold text-slate-800">
                         {m.producto_nombre}
                       </td>
@@ -355,7 +353,7 @@ export default function MovimientosPage() {
                         </span>
                       </td>
                       <td
-                        className={`px-3 py-3.5 text-right font-bold tabular-nums ${cantidadColor}`}
+                        className={`px-3 py-3.5 text-right font-bold tabular-nums ${anulado ? "text-slate-400 line-through" : cantidadColor}`}
                       >
                         {signo}
                         {Math.abs(m.cantidad)}
@@ -365,10 +363,18 @@ export default function MovimientosPage() {
                       </td>
                       <td className="hidden md:table-cell px-3 py-3.5">
                         <span
-                          className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${origenBadge[m.origen]}`}
+                          className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-semibold ${origenBadgeClass(m.origen)}`}
                         >
-                          {origenLabel[m.origen]}
+                          {origenLabel(m.origen)}
                         </span>
+                      </td>
+                      <td className="px-3 py-3.5 text-slate-700 text-xs">
+                        <span className="font-medium">{operacionLabel(m.origen, m.referencia)}</span>
+                        {anulado && (
+                          <span className="ml-1.5 inline-flex items-center rounded-md border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-bold text-red-600 align-middle">
+                            anulado
+                          </span>
+                        )}
                       </td>
                       <td className="hidden lg:table-cell px-3 py-3.5 text-slate-600 text-xs">
                         {m.usuario_nombre ?? (

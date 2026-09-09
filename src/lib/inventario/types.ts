@@ -1,6 +1,25 @@
 export type MetodoValuacion = "CPP" | "FIFO" | "LIFO";
 export type TipoMovimiento = "ENTRADA" | "SALIDA" | "AJUSTE";
-export type OrigenMovimiento = "compra" | "venta" | "ajuste_manual" | "inventario_inicial" | "devolucion_venta";
+/**
+ * Todos los orígenes reales permitidos por `movimientos_inventario.origen`
+ * (CHECK del schema del tenant). `anulacion_venta` se agrega en la migración
+ * de trazabilidad; los movimientos históricos de anulación de venta quedaron
+ * como `ajuste_manual` (se muestran igual bien por su `referencia` ANUL-VTA-…).
+ */
+export type OrigenMovimiento =
+  | "compra"
+  | "venta"
+  | "ajuste_manual"
+  | "inventario_inicial"
+  | "produccion"
+  | "devolucion_venta"
+  | "transferencia"
+  | "servicio_tecnico"
+  | "averia"
+  | "devolucion_proveedor"
+  | "reserva"
+  | "anulacion_reserva"
+  | "anulacion_venta";
 
 export interface Producto {
   id: string;
@@ -74,7 +93,11 @@ export interface MovimientoInventario {
   costo_unitario: number;
   origen: OrigenMovimiento;
   fecha: string;       // ISO string
-  referencia?: string; // ej: "COMP-000001"
+  referencia?: string; // ej: "COMP-000001", "VTA-000123", "RES-000045", "ANUL-VTA-000123"
   created_by?: string | null;
   usuario_nombre?: string | null;
+  /** Venta que originó el movimiento (venta / anulación de venta), si aplica. */
+  venta_id?: string | null;
+  /** ISO de anulación del movimiento (revertido). null = movimiento vigente. */
+  anulado_at?: string | null;
 }

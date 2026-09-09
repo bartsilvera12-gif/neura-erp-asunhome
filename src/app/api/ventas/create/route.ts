@@ -145,6 +145,13 @@ export async function POST(request: NextRequest) {
         ? null
         : String(o.observaciones).slice(0, 4000);
     const permitirSinStock = o.permitir_sin_stock === true;
+    // Idempotencia: clave por request (doble-click/timeout/retry). Se acepta del
+    // body o del header 'Idempotency-Key'. Si ya existe una venta con esa clave,
+    // createVentaTransaccionalPg devuelve la existente (deduped) sin crear otra.
+    const idempotencyKey =
+      (typeof o.idempotency_key === "string" && o.idempotency_key.trim()
+        ? o.idempotency_key.trim()
+        : request.headers.get("Idempotency-Key")?.trim() || null) || null;
     // El cajero eligió "Factura" (vs "Solo ticket"). La emisión real de factura ERP
     // se decide más abajo, solo si además la empresa está en modo 'sifen'.
     const emitirFacturaFlag = o.emitir_factura === true;
@@ -260,7 +267,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { ventaId, numeroControl, fechaIso, notaRemisionNumero, facturaId, numeroFactura, facturaWarning } =
+    const { ventaId, numeroControl, fechaIso, notaRemisionNumero, facturaId, numeroFactura, facturaWarning, deduped } =
       await createVentaTransaccionalPg({
         schema,
         empresaId: auth.empresa_id,
@@ -286,7 +293,32 @@ export async function POST(request: NextRequest) {
         vendedorId: o.vendedor_id != null && String(o.vendedor_id).trim() !== "" ? String(o.vendedor_id) : null,
         vendedorNombre: o.vendedor_nombre != null && String(o.vendedor_nombre).trim() !== "" ? String(o.vendedor_nombre).slice(0, 200) : null,
         emitirFactura,
+        idempotencyKey,
       });
+
+    // Request repetido (misma idempotency_key): la venta ya existe y sus efectos
+    // secundarios (pago_detalle, series, pedido→venta) YA se aplicaron en el
+    // request original. Devolvemos la venta sin re-ejecutar nada para no duplicar.
+    if (deduped) {
+      let s = 0, i = 0, t = 0;
+      for (const it of items) { s += it.subtotal; i += it.monto_iva; t += it.total_linea; }
+      const ventaDedup = toVentaResponse(items, {
+        id: ventaId, numero_control: numeroControl, fechaIso, moneda,
+        tipo_cambio: tipoCambio, tipo_venta: tipoVenta,
+        plazo_dias: tipoVenta === "CREDITO" ? plazoDias ?? undefined : undefined,
+        metodo_pago: metodoPago, subtotal: s, monto_iva: i, total: t,
+        genera_nota_remision: !!notaRemisionNumero, nota_remision_numero: notaRemisionNumero,
+      });
+      return NextResponse.json(
+        successResponse({
+          venta: ventaDedup,
+          nota_remision_numero: notaRemisionNumero,
+          factura: facturaId ? { id: facturaId, numero_factura: numeroFactura ?? null } : null,
+          factura_warning: facturaWarning ?? null,
+          deduped: true,
+        })
+      );
+    }
 
     // Vincular el pedido facturado con la venta creada (Caja). Trazabilidad:
     // presupuesto → pedido → venta. Marca el pedido como 'facturado' con venta_id.
