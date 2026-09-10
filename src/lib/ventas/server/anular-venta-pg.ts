@@ -22,6 +22,7 @@ function pool() {
 export type AnularVentaCode =
   | "venta_no_encontrada"
   | "venta_ya_anulada"
+  | "venta_de_guarda"
   | "sin_caja"
   | "caja_cerrada";
 
@@ -64,6 +65,7 @@ export async function anularVentaPg(
   const tCxc = quoteSchemaTable(schema, "cuentas_por_cobrar");
   const tSeries = quoteSchemaTable(schema, "producto_series");
   const tD = quoteSchemaTable(schema, "devoluciones_venta");
+  const tRes = quoteSchemaTable(schema, "reservas");
 
   const client = await pool().connect();
   try {
@@ -88,6 +90,20 @@ export async function anularVentaPg(
     if (String(venta.estado) === "anulada") {
       await client.query("ROLLBACK");
       throw new AnularVentaError("venta_ya_anulada", "La venta ya está anulada.");
+    }
+    // Ventas originadas desde una guarda: el stock salió por la reserva, no por
+    // esta venta. Anular acá no revierte stock correctamente → se gestiona desde
+    // la guarda. Se bloquea con mensaje claro.
+    const resQ = await client.query(
+      `SELECT 1 FROM ${tRes} WHERE venta_id = $1::uuid AND empresa_id = $2::uuid LIMIT 1`,
+      [ventaId, empresaId]
+    );
+    if (resQ.rows[0]) {
+      await client.query("ROLLBACK");
+      throw new AnularVentaError(
+        "venta_de_guarda",
+        "Esta venta proviene de una guarda y debe gestionarse desde la guarda para evitar alterar incorrectamente el stock."
+      );
     }
 
     // ── 2) Regla "solo caja actual": la caja de la venta debe estar abierta.

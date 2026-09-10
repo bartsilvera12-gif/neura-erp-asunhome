@@ -125,6 +125,7 @@ export type BloqueoDevolucion =
   | "cantidad_excedida"
   | "venta_no_encontrada"
   | "venta_anulada"
+  | "venta_de_guarda"
   | "sin_items"
   | "stock_insuficiente_cambio"
   | "devolucion_no_encontrada"

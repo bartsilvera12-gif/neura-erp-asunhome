@@ -140,6 +140,23 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Ventas originadas desde una guarda (reservas.venta_id = venta.id): se marcan
+    // para bloquear Devolver/Anular en el listado (el guard real está en backend).
+    const ventaIds = ventasRows.map((v) => v.id);
+    const guardaVentaIds = new Set<string>();
+    if (ventaIds.length > 0) {
+      const resQ = await ctx.supabase
+        .from("reservas")
+        .select("venta_id")
+        .eq("empresa_id", empresaId)
+        .in("venta_id", ventaIds);
+      if (!resQ.error) {
+        for (const row of (resQ.data ?? []) as Array<{ venta_id: string | null }>) {
+          if (row.venta_id) guardaVentaIds.add(String(row.venta_id));
+        }
+      }
+    }
+
     const byVenta = new Map<string, VentaItemRow[]>();
     for (const row of itemsRows) {
       const list = byVenta.get(row.venta_id) ?? [];
@@ -190,6 +207,7 @@ export async function GET(request: NextRequest) {
         })(),
         anulada_at: (r as unknown as { anulada_at?: string | null }).anulada_at ?? null,
         anulada_motivo: (r as unknown as { anulada_motivo?: string | null }).anulada_motivo ?? null,
+        origen_guarda: guardaVentaIds.has(r.id),
       };
     });
 

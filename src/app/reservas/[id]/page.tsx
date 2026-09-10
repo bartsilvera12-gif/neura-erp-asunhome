@@ -2,7 +2,7 @@
 
 /** Detalle de reserva: ítems (entregar), pagos (anticipo), cancelar. */
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import MontoInput from "@/components/ui/MontoInput";
@@ -10,18 +10,20 @@ import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session"
 
 type Item = { id: string; producto_nombre: string; sku: string | null; cantidad: number; cantidad_entregada: number; precio_unitario: number; tipo_iva: string | null; total: number };
 type Pago = { id: string; fecha: string; monto: number; metodo_pago: string | null; referencia: string | null };
-type Header = { id: string; numero_control: string; cliente_nombre: string | null; fecha: string; estado: string; total: number; pagado: number; saldo: number; observaciones: string | null };
+type Header = { id: string; numero_control: string; cliente_nombre: string | null; fecha: string; estado: string; total: number; pagado: number; saldo: number; observaciones: string | null; venta_id: string | null };
 const fmtGs = (n: number) => `Gs. ${Math.round(n || 0).toLocaleString("es-PY")}`;
 const ESTADO_LBL: Record<string, string> = { activa: "En guarda", facturada: "Facturada", cancelada: "Cancelada" };
 
 export default function ReservaDetallePage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [header, setHeader] = useState<Header | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [pagos, setPagos] = useState<Pago[]>([]);
   const [cargando, setCargando] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [pagoOpen, setPagoOpen] = useState(false);
+  const [facturando, setFacturando] = useState(false);
 
   const cargar = useCallback(async () => {
     setCargando(true); setErr(null);
@@ -57,9 +59,26 @@ export default function ReservaDetallePage() {
     void cargar();
   }
 
+  async function facturar() {
+    if (facturando) return; // guard anti doble-click
+    if (!window.confirm("¿Facturar esta guarda? Se genera la venta con el precio pactado, sin volver a descontar stock.")) return;
+    setFacturando(true);
+    try {
+      const r = await fetchWithSupabaseSession(`/api/reservas/${id}/facturar`, { method: "POST" });
+      const j = await r.json();
+      if (!r.ok || j?.success === false) { alert(j?.error ?? "No se pudo facturar."); return; }
+      // La guarda quedó vinculada a la venta; vamos al listado de ventas.
+      router.push("/ventas");
+    } finally {
+      setFacturando(false);
+    }
+  }
+
   if (cargando) return <p className="text-slate-500 animate-pulse">Cargando…</p>;
   if (err || !header) return <p className="text-red-600">{err ?? "No encontrada."}</p>;
   const activa = header.estado === "activa";
+  const facturada = header.estado === "facturada";
+  const saldoCero = header.saldo <= 0.009;
 
   return (
     <div className="space-y-6">
@@ -70,10 +89,28 @@ export default function ReservaDetallePage() {
           <p className="mt-0.5 text-sm text-slate-500">{header.cliente_nombre ?? "Sin cliente"} · {header.fecha} · <span className="font-medium">{ESTADO_LBL[header.estado] ?? header.estado}</span></p>
         </div>
         {activa && (
-          <div className="flex gap-2">
-            <button onClick={() => setPagoOpen(true)} className="rounded-lg bg-[#4FAEB2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#3F8E91]">Registrar pago / anticipo</button>
-            <button onClick={cancelar} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100">Cancelar</button>
+          <div className="flex flex-col items-end gap-1.5">
+            <div className="flex flex-wrap justify-end gap-2">
+              <button onClick={() => setPagoOpen(true)} className="rounded-lg bg-[#4FAEB2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#3F8E91]">Registrar pago / anticipo</button>
+              <button
+                onClick={facturar}
+                disabled={!saldoCero || facturando}
+                title={saldoCero ? "Genera la venta con el precio pactado, sin volver a descontar stock." : "Cobrá el saldo pendiente para poder facturar."}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {facturando ? "Facturando…" : "Facturar / Convertir en venta"}
+              </button>
+              <button onClick={cancelar} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100">Cancelar</button>
+            </div>
+            {!saldoCero && (
+              <p className="text-[11px] text-amber-600">Cobrá el saldo ({fmtGs(header.saldo)}) para habilitar la facturación.</p>
+            )}
           </div>
+        )}
+        {facturada && (
+          <Link href="/ventas" className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100">
+            ✓ Facturada — ver en Ventas
+          </Link>
         )}
       </div>
 
@@ -149,7 +186,7 @@ export default function ReservaDetallePage() {
       </div>
 
       {header.observaciones && <p className="text-sm text-slate-500">Observaciones: {header.observaciones}</p>}
-      <p className="text-xs text-slate-400">La facturación final (una factura sin re-descontar stock) se agrega según lo defina el cliente.</p>
+      <p className="text-xs text-slate-400">Al facturar, se genera la venta con el precio pactado y NO se vuelve a descontar stock (la mercadería ya salió al crear la guarda). Requiere saldo en 0 — los anticipos ya entraron a caja.</p>
 
       {pagoOpen && <PagoModal reservaId={id} saldo={header.saldo} onClose={() => setPagoOpen(false)} onDone={() => { setPagoOpen(false); void cargar(); }} />}
     </div>

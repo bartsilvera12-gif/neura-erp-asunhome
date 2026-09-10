@@ -88,4 +88,7 @@ export interface Venta {
   estado?: "activa" | "anulada" | "parcialmente_devuelta" | "devuelta_total";
   anulada_at?: string | null;
   anulada_motivo?: string | null;
+  /** true si la venta se originó al facturar una guarda (reservas.venta_id = id).
+   *  Estas ventas NO se pueden Devolver/Anular: se gestionan desde la guarda. */
+  origen_guarda?: boolean;
 }

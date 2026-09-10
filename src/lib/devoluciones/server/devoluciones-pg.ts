@@ -207,6 +207,7 @@ export async function crearDevolucion(
   const tMI = quoteSchemaTable(schema, "movimientos_inventario");
   const tCM = quoteSchemaTable(schema, "caja_movimientos");
   const tFA = quoteSchemaTable(schema, "factura_autoimpresor");
+  const tRes = quoteSchemaTable(schema, "reservas");
 
   if (!input.items || input.items.length === 0) {
     throw new DevolucionBloqueadaError("sin_items", "Seleccioná al menos un producto a devolver.");
@@ -240,6 +241,18 @@ export async function crearDevolucion(
     if (!venta) throw new DevolucionBloqueadaError("venta_no_encontrada", "La venta no existe.");
     if (String(venta.estado) === "anulada") {
       throw new DevolucionBloqueadaError("venta_anulada", "La venta está anulada; no admite devoluciones.");
+    }
+    // Ventas originadas desde una guarda: el stock salió por la reserva, no por la
+    // venta. Devolver acá reintegraría stock que la venta no descontó. Se bloquea.
+    const resQ = await client.query(
+      `SELECT 1 FROM ${tRes} WHERE venta_id = $1::uuid AND empresa_id = $2::uuid LIMIT 1`,
+      [input.venta_id, empresaId]
+    );
+    if (resQ.rows[0]) {
+      throw new DevolucionBloqueadaError(
+        "venta_de_guarda",
+        "Esta venta proviene de una guarda y debe gestionarse desde la guarda para evitar alterar incorrectamente el stock."
+      );
     }
 
     // ── 2) Lineas bloqueadas + cantidades ya devueltas.

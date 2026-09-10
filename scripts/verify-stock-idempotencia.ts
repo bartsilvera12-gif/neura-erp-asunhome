@@ -214,10 +214,112 @@ async function main() {
     assert(Number(stA.rows[0].s) === 4, `A: stock debe ser 4 tras revertir la devolución (fue ${stA.rows[0].s})`);
     ok("Atomicidad A: devolución + venta anuladas en UNA sola tx → COMMIT consistente");
 
+    // ── Facturar guarda → venta SIN re-descontar stock (patrón facturarReservaPg) ─
+    // Escenario: stock 2 → guarda 1 → stock 1. La guarda quedó con precio pactado
+    // 5.100.000 y saldo 0. Facturar NO debe volver a descontar stock.
+    await client.query(`UPDATE ${S("productos")} SET stock_actual = 1 WHERE id=$1::uuid`, [productoId]);
+    const resNum = `${tag}-RES`;
+    const resIns = await client.query<{ id: string }>(
+      `INSERT INTO ${S("reservas")} (empresa_id, numero_control, estado, total, pagado, saldo)
+       VALUES ($1::uuid,$2,'activa',5100000,5100000,0) RETURNING id`,
+      [empresaId, resNum]
+    );
+    const reservaId = resIns.rows[0].id;
+    await client.query(
+      `INSERT INTO ${S("reserva_items")} (empresa_id, reserva_id, producto_id, producto_nombre, sku,
+         cantidad, cantidad_entregada, precio_unitario, tipo_iva, subtotal, monto_iva, total)
+       VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,1,0,5100000,'10%',4636364,463636,5100000)`,
+      [empresaId, reservaId, productoId, `${tag} ANAFE TEST`, `${tag}-SKU`]);
+    // SALIDA física de la guarda (la única que debe existir).
+    await client.query(
+      `INSERT INTO ${S("movimientos_inventario")} (empresa_id, producto_id, producto_nombre, producto_sku,
+         tipo, cantidad, costo_unitario, origen, referencia, fecha)
+       VALUES ($1::uuid,$2::uuid,$3,$4,'SALIDA',1,0,'reserva',$5, now())`,
+      [empresaId, productoId, `${tag} ANAFE TEST`, `${tag}-SKU`, resNum]);
+
+    // Facturar (mirror de facturarReservaPg): FOR UPDATE + guard estado/saldo,
+    // crea venta caja_id NULL, precio pactado, NO toca stock, liga la SALIDA.
+    async function facturarMirror(): Promise<"facturada" | "yaFacturada" | "saldo"> {
+      const c = new Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
+      await c.connect();
+      try {
+        await c.query("BEGIN");
+        const rq = await c.query<{ estado: string; saldo: string; venta_id: string | null }>(
+          `SELECT estado, saldo::text AS saldo, venta_id::text AS venta_id FROM ${S("reservas")} WHERE id=$1::uuid FOR UPDATE`, [reservaId]);
+        const rr = rq.rows[0];
+        if (rr.estado === "facturada") { await c.query("COMMIT"); return "yaFacturada"; }
+        if (Number(rr.saldo) > 0.009) { await c.query("ROLLBACK"); return "saldo"; }
+        const vNum = `${tag}-VGUARDA`;
+        const vi = await c.query<{ id: string }>(
+          `INSERT INTO ${S("ventas")} (empresa_id, numero_control, estado, tipo_venta, metodo_pago, total, caja_id, fecha)
+           VALUES ($1::uuid,$2,'completada','CONTADO','efectivo',5100000,NULL, now()) RETURNING id`, [empresaId, vNum]);
+        const vId = vi.rows[0].id;
+        await c.query(
+          `INSERT INTO ${S("ventas_items")} (empresa_id, venta_id, producto_id, producto_nombre, sku, cantidad,
+             precio_venta_original, precio_venta, costo_unitario, tipo_iva, tipo_precio, subtotal, monto_iva, total_linea, cantidad_total_base)
+           VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,1,5100000,5100000,0,'10%','minorista',4636364,463636,5100000,1)`,
+          [empresaId, vId, productoId, `${tag} ANAFE TEST`, `${tag}-SKU`]);
+        await c.query(`UPDATE ${S("reservas")} SET estado='facturada', venta_id=$1::uuid WHERE id=$2::uuid`, [vId, reservaId]);
+        await c.query(`UPDATE ${S("movimientos_inventario")} SET venta_id=$1::uuid WHERE referencia=$2 AND origen='reserva' AND venta_id IS NULL`, [vId, resNum]);
+        await c.query("COMMIT");
+        return "facturada";
+      } catch (e) { await c.query("ROLLBACK").catch(() => null); throw e; }
+      finally { await c.end(); }
+    }
+
+    // Caso A: facturar OK.
+    const rA = await facturarMirror();
+    assert(rA === "facturada", "A: la guarda debe facturarse");
+    const stG = await client.query<{ s: string }>(`SELECT stock_actual::text AS s FROM ${S("productos")} WHERE id=$1::uuid`, [productoId]);
+    assert(Number(stG.rows[0].s) === 1, `A: el stock NO debe cambiar al facturar (sigue 1, fue ${stG.rows[0].s})`);
+    const vg = await client.query<{ n: string; precio: string | null; caja: string | null }>(
+      `SELECT count(*)::text AS n, max(vi.precio_venta)::text AS precio, max(v.caja_id::text) AS caja
+         FROM ${S("ventas")} v JOIN ${S("ventas_items")} vi ON vi.venta_id=v.id
+        WHERE v.numero_control=$1`, [`${tag}-VGUARDA`]);
+    assert(Number(vg.rows[0].n) === 1, "A: debe existir la venta de la guarda");
+    assert(Number(vg.rows[0].precio) === 5100000, `A: precio pactado 5.100.000 respetado (fue ${vg.rows[0].precio})`);
+    assert(vg.rows[0].caja === null, "A: la venta de guarda NO debe tener caja (no toca caja)");
+    const salG = await client.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM ${S("movimientos_inventario")} WHERE producto_sku=$1 AND tipo='SALIDA' AND origen='reserva' AND anulado_at IS NULL`, [`${tag}-SKU`]);
+    assert(Number(salG.rows[0].n) === 1, "A: una sola SALIDA física (la de la guarda), sin segunda por la venta");
+    ok("Facturar guarda: venta a precio pactado, stock sin cambios, una sola SALIDA, sin caja");
+
+    // Caso B: reintento de facturación → no crea segunda venta ni cambia stock.
+    const rB = await facturarMirror();
+    assert(rB === "yaFacturada", "B: el reintento debe ver la guarda ya facturada (no-op)");
+    const vgB = await client.query<{ n: string }>(`SELECT count(*)::text AS n FROM ${S("ventas")} WHERE numero_control=$1`, [`${tag}-VGUARDA`]);
+    assert(Number(vgB.rows[0].n) === 1, "B: sigue habiendo UNA sola venta de guarda");
+    const stGB = await client.query<{ s: string }>(`SELECT stock_actual::text AS s FROM ${S("productos")} WHERE id=$1::uuid`, [productoId]);
+    assert(Number(stGB.rows[0].s) === 1, "B: el stock sigue en 1");
+    ok("Facturar guarda idempotente: reintento no crea 2ª venta ni cambia stock");
+
+    // Caso D: guarda facturada → cancelar NO reintegra stock (guard estado='activa').
+    async function cancelarGuardaSiActiva(): Promise<boolean> {
+      const c = new Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
+      await c.connect();
+      try {
+        await c.query("BEGIN");
+        const rq = await c.query<{ estado: string }>(`SELECT estado FROM ${S("reservas")} WHERE id=$1::uuid FOR UPDATE`, [reservaId]);
+        if (rq.rows[0].estado !== "activa") { await c.query("ROLLBACK"); return false; } // bloqueado
+        await c.query(`UPDATE ${S("productos")} SET stock_actual = stock_actual + 1 WHERE id=$1::uuid`, [productoId]);
+        await c.query(`UPDATE ${S("reservas")} SET estado='cancelada' WHERE id=$1::uuid`, [reservaId]);
+        await c.query("COMMIT"); return true;
+      } catch (e) { await c.query("ROLLBACK").catch(() => null); throw e; }
+      finally { await c.end(); }
+    }
+    const cD = await cancelarGuardaSiActiva();
+    assert(cD === false, "D: no debe permitir cancelar una guarda ya facturada");
+    const stGD = await client.query<{ s: string }>(`SELECT stock_actual::text AS s FROM ${S("productos")} WHERE id=$1::uuid`, [productoId]);
+    assert(Number(stGD.rows[0].s) === 1, "D: el stock NO se reintegra en una guarda facturada");
+    ok("Guarda facturada: no se puede cancelar reintegrando stock (guard estado='activa')");
+
     console.log(`\n${passed} verificaciones OK`);
   } finally {
     // ── Limpieza: borrar TODO lo creado por este run (por tag). ────────────────
     try {
+      await client.query(`DELETE FROM ${S("reserva_items")} WHERE sku=$1`, [`${tag}-SKU`]);
+      await client.query(`DELETE FROM ${S("reservas")} WHERE numero_control LIKE $1`, [`${tag}%`]);
+      await client.query(`DELETE FROM ${S("ventas_items")} WHERE sku=$1`, [`${tag}-SKU`]);
       await client.query(`DELETE FROM ${S("movimientos_inventario")} WHERE producto_sku=$1 OR referencia LIKE $2`,
         [`${tag}-SKU`, `%${tag}%`]);
       await client.query(`DELETE FROM ${S("ventas")} WHERE numero_control LIKE $1`, [`${tag}%`]);

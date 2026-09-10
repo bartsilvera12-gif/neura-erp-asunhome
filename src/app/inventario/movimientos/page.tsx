@@ -370,6 +370,12 @@ export default function MovimientosPage() {
                       </td>
                       <td className="px-3 py-3.5 text-slate-700 text-xs">
                         <span className="font-medium">{operacionLabel(m.origen, m.referencia)}</span>
+                        {/* Guarda que luego fue facturada: la SALIDA 'reserva' queda ligada a la venta. */}
+                        {m.origen === "reserva" && m.venta_id && (
+                          <span className="ml-1.5 inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 align-middle">
+                            facturada
+                          </span>
+                        )}
                         {anulado && (
                           <span className="ml-1.5 inline-flex items-center rounded-md border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-bold text-red-600 align-middle">
                             anulado

@@ -279,6 +279,196 @@ export async function cancelarReserva(
   }
 }
 
+// ── Facturar guarda → venta (sin re-descontar stock) ─────────────────────────
+
+export type FacturarReservaCode =
+  | "reserva_no_encontrada"
+  | "reserva_cancelada"
+  | "saldo_pendiente"
+  | "sin_items";
+
+export class FacturarReservaError extends Error {
+  code: FacturarReservaCode;
+  constructor(code: FacturarReservaCode, message: string) {
+    super(message);
+    this.name = "FacturarReservaError";
+    this.code = code;
+  }
+}
+
+export interface FacturarReservaResult {
+  ventaId: string;
+  numeroControl: string;
+  reservaNumero: string;
+  /** true si la guarda ya estaba facturada y se devolvió esa venta (idempotencia). */
+  deduped: boolean;
+}
+
+/**
+ * Convierte una guarda ACTIVA y 100% PAGADA en una venta (ticket), SIN volver a
+ * descontar stock (la SALIDA ya ocurrió al crear la guarda, origen 'reserva').
+ *
+ * Reglas (definidas con el cliente):
+ *  - Solo se factura si estado='activa' y saldo=0 (los cobros ya entraron a caja
+ *    vía reserva_pagos). Si hay saldo > 0 → error (cobrar primero).
+ *  - La venta NO genera ingreso de caja nuevo: se crea con caja_id = NULL, así no
+ *    aparece en el arqueo de caja (evita doble conteo del dinero ya cobrado).
+ *  - Precio: se usa el pactado (reserva_items.precio_unitario), NO el precio/costo
+ *    actual del producto.
+ *  - Vincula reservas.venta_id + estado 'facturada', marca ítems entregados, y
+ *    liga los movimientos SALIDA 'reserva' con la venta (trazabilidad).
+ *
+ * Atómico (BEGIN/COMMIT) + idempotente: SELECT reserva FOR UPDATE. Un doble-click
+ * ve la guarda ya 'facturada' y devuelve la MISMA venta (no crea otra).
+ */
+export async function facturarReservaPg(
+  schemaRaw: string,
+  empresaId: string,
+  reservaId: string,
+  user: { id: string | null; nombre: string | null }
+): Promise<FacturarReservaResult> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const tR = quoteSchemaTable(schema, "reservas");
+  const tRI = quoteSchemaTable(schema, "reserva_items");
+  const tV = quoteSchemaTable(schema, "ventas");
+  const tVI = quoteSchemaTable(schema, "ventas_items");
+  const tP = quoteSchemaTable(schema, "productos");
+  const tM = quoteSchemaTable(schema, "movimientos_inventario");
+
+  const client = await pool().connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1) Bloquear la guarda (serialización): nadie más la factura en paralelo.
+    const rQ = await client.query<{
+      numero_control: string; estado: string; cliente_id: string | null;
+      total: string; pagado: string; saldo: string; venta_id: string | null;
+      moneda: string | null;
+    }>(
+      `SELECT numero_control, estado, cliente_id::text AS cliente_id,
+              total::text AS total, pagado::text AS pagado, saldo::text AS saldo,
+              venta_id::text AS venta_id, moneda
+         FROM ${tR} WHERE id = $1::uuid AND empresa_id = $2::uuid FOR UPDATE`,
+      [reservaId, empresaId]
+    );
+    const r = rQ.rows[0];
+    if (!r) { await client.query("ROLLBACK"); throw new FacturarReservaError("reserva_no_encontrada", "Reserva no encontrada."); }
+    const reservaNumero = String(r.numero_control ?? "");
+
+    // 2) Idempotencia: ya facturada → devolver la venta existente.
+    if (String(r.estado) === "facturada" && r.venta_id) {
+      const vExist = await client.query<{ numero_control: string }>(
+        `SELECT numero_control FROM ${tV} WHERE id = $1::uuid AND empresa_id = $2::uuid`,
+        [r.venta_id, empresaId]
+      );
+      await client.query("COMMIT");
+      return { ventaId: String(r.venta_id), numeroControl: String(vExist.rows[0]?.numero_control ?? ""), reservaNumero, deduped: true };
+    }
+    if (String(r.estado) === "cancelada") { await client.query("ROLLBACK"); throw new FacturarReservaError("reserva_cancelada", "La guarda está cancelada; no se puede facturar."); }
+    // Regla de dinero: solo se factura si NO queda saldo (todo cobrado por anticipos).
+    const saldo = Number(r.saldo) || 0;
+    if (saldo > 0.009) {
+      await client.query("ROLLBACK");
+      throw new FacturarReservaError("saldo_pendiente", `No se puede facturar: hay saldo pendiente de ${round2(saldo)}. Registrá el pago para dejar el saldo en 0.`);
+    }
+
+    // 3) Ítems de la guarda (precio pactado). Costo actual solo para snapshot de ganancia.
+    const itQ = await client.query<{
+      producto_id: string | null; producto_nombre: string | null; sku: string | null;
+      cantidad: string; precio_unitario: string; tipo_iva: string | null;
+      subtotal: string; monto_iva: string; total: string;
+    }>(
+      `SELECT producto_id::text AS producto_id, producto_nombre, sku,
+              cantidad::text AS cantidad, precio_unitario::text AS precio_unitario,
+              tipo_iva, subtotal::text AS subtotal, monto_iva::text AS monto_iva, total::text AS total
+         FROM ${tRI} WHERE reserva_id = $1::uuid AND empresa_id = $2::uuid`,
+      [reservaId, empresaId]
+    );
+    if (itQ.rows.length === 0) { await client.query("ROLLBACK"); throw new FacturarReservaError("sin_items", "La guarda no tiene ítems para facturar."); }
+
+    // Costo actual por producto (snapshot para reportes de rentabilidad).
+    const prodIds = [...new Set(itQ.rows.map((x) => x.producto_id).filter((x): x is string => !!x))];
+    const costoById = new Map<string, number>();
+    if (prodIds.length > 0) {
+      const cQ = await client.query<{ id: string; costo_promedio: string | null }>(
+        `SELECT id::text AS id, costo_promedio::text AS costo_promedio FROM ${tP}
+          WHERE empresa_id = $1::uuid AND id = ANY($2::uuid[])`,
+        [empresaId, prodIds]
+      );
+      for (const c of cQ.rows) costoById.set(String(c.id), Number(c.costo_promedio) || 0);
+    }
+
+    let subtotal = 0, montoIva = 0, total = 0;
+    for (const it of itQ.rows) { subtotal += Number(it.subtotal) || 0; montoIva += Number(it.monto_iva) || 0; total += Number(it.total) || 0; }
+
+    // 4) Número de control VTA-XXXXXX (best-effort, igual que la venta normal).
+    const maxQ = await client.query<{ maxn: number | null }>(
+      `SELECT COALESCE(MAX(CASE WHEN numero_control ~ '^VTA-[0-9]+$'
+         THEN (substring(numero_control from 5))::int ELSE 0 END), 0) AS maxn
+         FROM ${tV} WHERE empresa_id = $1::uuid`,
+      [empresaId]
+    );
+    const numeroControl = `VTA-${String((Number(maxQ.rows[0]?.maxn) || 0) + 1).padStart(6, "0")}`;
+
+    // 5) Insertar la venta. caja_id = NULL (no toca caja: el dinero ya está en
+    //    reserva_pagos). tipo CONTADO, estado completada, sin retención.
+    const obs = `Facturación de guarda ${reservaNumero}`;
+    const insV = await client.query<{ id: string }>(
+      `INSERT INTO ${tV} (empresa_id, cliente_id, numero_control, moneda, tipo_cambio,
+         subtotal, monto_iva, total, estado, tipo_venta, metodo_pago, caja_id, fecha,
+         observaciones, created_by, usuario_nombre)
+       VALUES ($1::uuid,$2::uuid,$3,$4,1,$5::numeric,$6::numeric,$7::numeric,'completada','CONTADO','efectivo',NULL, now(),
+               $8,$9::uuid,$10)
+       RETURNING id::text`,
+      [empresaId, r.cliente_id, numeroControl, (r.moneda || "GS"), subtotal, montoIva, total, obs, user.id, user.nombre]
+    );
+    const ventaId = String(insV.rows[0].id);
+
+    // 6) Ítems de la venta desde los de la guarda (precio pactado).
+    for (const it of itQ.rows) {
+      const costo = it.producto_id ? (costoById.get(it.producto_id) ?? 0) : 0;
+      await client.query(
+        `INSERT INTO ${tVI} (empresa_id, venta_id, producto_id, producto_nombre, sku, cantidad,
+           precio_venta_original, precio_venta, costo_unitario, tipo_iva, tipo_precio,
+           subtotal, monto_iva, total_linea, cantidad_total_base)
+         VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::numeric,$7::numeric,$7::numeric,$8::numeric,$9,'minorista',
+                 $10::numeric,$11::numeric,$12::numeric,$6::numeric)`,
+        [empresaId, ventaId, it.producto_id, it.producto_nombre, it.sku, Number(it.cantidad) || 0,
+         Number(it.precio_unitario) || 0, costo, (it.tipo_iva || "10%"),
+         Number(it.subtotal) || 0, Number(it.monto_iva) || 0, Number(it.total) || 0]
+      );
+    }
+
+    // 7) Vincular guarda ↔ venta y marcar facturada + ítems entregados.
+    await client.query(
+      `UPDATE ${tR} SET estado = 'facturada', venta_id = $1::uuid, updated_at = now()
+        WHERE id = $2::uuid AND empresa_id = $3::uuid`,
+      [ventaId, reservaId, empresaId]
+    );
+    await client.query(
+      `UPDATE ${tRI} SET cantidad_entregada = cantidad WHERE reserva_id = $1::uuid AND empresa_id = $2::uuid`,
+      [reservaId, empresaId]
+    );
+
+    // 8) Trazabilidad: ligar la(s) SALIDA original(es) 'reserva' con la venta.
+    //    NO se crea una segunda SALIDA física. La unidad "salió por guarda" y esa
+    //    guarda "fue facturada" (venta_id set en el movimiento de reserva).
+    await client.query(
+      `UPDATE ${tM} SET venta_id = $1::uuid
+        WHERE empresa_id = $2::uuid AND referencia = $3 AND origen = 'reserva' AND venta_id IS NULL`,
+      [ventaId, empresaId, reservaNumero]
+    );
+
+    await client.query("COMMIT");
+    return { ventaId, numeroControl, reservaNumero, deduped: false };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => null);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // ── Lecturas ─────────────────────────────────────────────────────────────────
 
 export interface ReservaResumen {

@@ -375,7 +375,7 @@ export default function VentasPage() {
                       </td>
                       <td className="py-4 text-center align-middle" onClick={(e) => e.stopPropagation()}>
                         <div className="inline-flex items-center gap-1.5">
-                          {devolucionesOn && !isAnulada && v.estado !== "devuelta_total" && (
+                          {devolucionesOn && !isAnulada && v.estado !== "devuelta_total" && !v.origen_guarda && (
                             <button
                               type="button"
                               onClick={() => setDevolverVentaId(v.id)}
@@ -430,7 +430,7 @@ export default function VentasPage() {
                               Editar
                             </button>
                           )}
-                          {!isAnulada && (
+                          {!isAnulada && !v.origen_guarda && (
                             <button
                               type="button"
                               onClick={() => setAnularTarget(v)}
@@ -443,6 +443,14 @@ export default function VentasPage() {
                             >
                               Anular
                             </button>
+                          )}
+                          {v.origen_guarda && (
+                            <span
+                              className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700"
+                              title="Esta venta proviene de una guarda y debe gestionarse desde la guarda para evitar alterar incorrectamente el stock."
+                            >
+                              Desde guarda
+                            </span>
                           )}
                         </div>
                       </td>

@@ -1,0 +1,46 @@
+/**
+ * POST /api/reservas/[id]/facturar — convierte una guarda ACTIVA y 100% pagada
+ * en una venta (ticket) SIN re-descontar stock ni generar ingreso de caja nuevo.
+ * Idempotente: si ya está facturada, devuelve la misma venta.
+ */
+import { NextRequest, NextResponse } from "next/server";
+import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
+import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
+import { successResponse, errorResponse } from "@/lib/api/response";
+import { API_ERRORS } from "@/lib/api/errors";
+import { facturarReservaPg, FacturarReservaError } from "@/lib/reservas/server/reservas-pg";
+
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const ctx = await getTenantSupabaseFromAuth(request);
+    if (!ctx) return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
+    const schema = await fetchDataSchemaForEmpresaId(ctx.auth.empresa_id);
+    const { id } = await params;
+
+    const result = await facturarReservaPg(schema, ctx.auth.empresa_id, id, {
+      id: ctx.auth.usuarioCatalogId ?? null,
+      nombre: ctx.auth.nombre ?? ctx.auth.user?.email ?? null,
+    });
+
+    return NextResponse.json(
+      successResponse({
+        ok: true,
+        venta_id: result.ventaId,
+        numero_control: result.numeroControl,
+        reserva_numero: result.reservaNumero,
+        deduped: result.deduped,
+      })
+    );
+  } catch (err) {
+    if (err instanceof FacturarReservaError) {
+      const status =
+        err.code === "reserva_no_encontrada" ? 404 :
+        err.code === "saldo_pendiente" ? 409 :
+        400; // reserva_cancelada | sin_items
+      return NextResponse.json(errorResponse(err.message), { status });
+    }
+    const msg = err instanceof Error ? err.message : "No se pudo facturar la guarda.";
+    console.error("[/api/reservas/[id]/facturar POST]", msg);
+    return NextResponse.json(errorResponse(msg), { status: 500 });
+  }
+}
