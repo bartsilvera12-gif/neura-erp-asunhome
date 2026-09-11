@@ -2,13 +2,13 @@
 
 /** Detalle de reserva: ítems (entregar), pagos (anticipo), cancelar. */
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import MontoInput from "@/components/ui/MontoInput";
 import { fetchWithSupabaseSession } from "@/lib/api/fetch-with-supabase-session";
 
-type Item = { id: string; producto_nombre: string; sku: string | null; cantidad: number; cantidad_entregada: number; precio_unitario: number; tipo_iva: string | null; total: number };
+type Item = { id: string; producto_nombre: string; sku: string | null; cantidad: number; cantidad_entregada: number; precio_unitario: number; tipo_iva: string | null; total: number; venta_id: string | null; venta_numero: string | null };
 type Pago = { id: string; fecha: string; monto: number; metodo_pago: string | null; referencia: string | null };
 type Header = { id: string; numero_control: string; cliente_nombre: string | null; fecha: string; estado: string; total: number; pagado: number; saldo: number; observaciones: string | null; venta_id: string | null };
 const fmtGs = (n: number) => `Gs. ${Math.round(n || 0).toLocaleString("es-PY")}`;
@@ -16,7 +16,6 @@ const ESTADO_LBL: Record<string, string> = { activa: "En guarda", facturada: "Fa
 
 export default function ReservaDetallePage() {
   const { id } = useParams<{ id: string }>();
-  const router = useRouter();
   const [header, setHeader] = useState<Header | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [pagos, setPagos] = useState<Pago[]>([]);
@@ -24,6 +23,7 @@ export default function ReservaDetallePage() {
   const [err, setErr] = useState<string | null>(null);
   const [pagoOpen, setPagoOpen] = useState(false);
   const [facturando, setFacturando] = useState(false);
+  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
 
   const cargar = useCallback(async () => {
     setCargando(true); setErr(null);
@@ -59,16 +59,24 @@ export default function ReservaDetallePage() {
     void cargar();
   }
 
-  async function facturar() {
+  // itemIds=null → factura TODOS los pendientes; con array → solo esos (parcial).
+  async function facturar(itemIds: string[] | null) {
     if (facturando) return; // guard anti doble-click
-    if (!window.confirm("¿Facturar esta guarda? Se genera la venta con el precio pactado, sin volver a descontar stock.")) return;
+    const cuantos = itemIds ? itemIds.length : items.filter((it) => !it.venta_id).length;
+    const msg = itemIds
+      ? `¿Facturar ${cuantos} producto(s) seleccionado(s) al precio pactado? No se vuelve a descontar stock.`
+      : `¿Facturar todos los productos pendientes al precio pactado? No se vuelve a descontar stock.`;
+    if (!window.confirm(msg)) return;
     setFacturando(true);
     try {
-      const r = await fetchWithSupabaseSession(`/api/reservas/${id}/facturar`, { method: "POST" });
+      const r = await fetchWithSupabaseSession(`/api/reservas/${id}/facturar`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(itemIds ? { item_ids: itemIds } : {}),
+      });
       const j = await r.json();
       if (!r.ok || j?.success === false) { alert(j?.error ?? "No se pudo facturar."); return; }
-      // La guarda quedó vinculada a la venta; vamos al listado de ventas.
-      router.push("/ventas");
+      setSeleccionados(new Set());
+      await cargar(); // recargar: muestra qué productos quedaron facturados y cuáles en guarda
     } finally {
       setFacturando(false);
     }
@@ -78,7 +86,23 @@ export default function ReservaDetallePage() {
   if (err || !header) return <p className="text-red-600">{err ?? "No encontrada."}</p>;
   const activa = header.estado === "activa";
   const facturada = header.estado === "facturada";
-  const saldoCero = header.saldo <= 0.009;
+  const itemsPendientes = items.filter((it) => !it.venta_id);
+  const selPend = itemsPendientes.filter((it) => seleccionados.has(it.id));
+  const totalSeleccionado = selPend.reduce((s, it) => s + it.total, 0);
+  const toggleSel = (itemId: string) =>
+    setSeleccionados((prev) => { const n = new Set(prev); if (n.has(itemId)) n.delete(itemId); else n.add(itemId); return n; });
+  const toggleTodos = () =>
+    setSeleccionados((prev) => (prev.size >= itemsPendientes.length && itemsPendientes.length > 0 ? new Set() : new Set(itemsPendientes.map((it) => it.id))));
+
+  // Regla de dinero: "lo pagado cubre lo facturado". Cada facturación (parcial o
+  // total) sólo procede si el pago acumulado alcanza para cubrir lo ya facturado
+  // MÁS lo que se está por facturar. `disponible` = pago que aún no respalda
+  // ninguna factura y por ende puede cubrir productos nuevos.
+  const facturadoPrevio = items.filter((it) => it.venta_id).reduce((s, it) => s + it.total, 0);
+  const disponible = header.pagado - facturadoPrevio;
+  const selCubierto = totalSeleccionado <= disponible + 0.009;
+  const totalPendiente = itemsPendientes.reduce((s, it) => s + it.total, 0);
+  const todoCubierto = totalPendiente <= disponible + 0.009;
 
   return (
     <div className="space-y-6">
@@ -92,18 +116,36 @@ export default function ReservaDetallePage() {
           <div className="flex flex-col items-end gap-1.5">
             <div className="flex flex-wrap justify-end gap-2">
               <button onClick={() => setPagoOpen(true)} className="rounded-lg bg-[#4FAEB2] px-4 py-2 text-sm font-semibold text-white hover:bg-[#3F8E91]">Registrar pago / anticipo</button>
-              <button
-                onClick={facturar}
-                disabled={!saldoCero || facturando}
-                title={saldoCero ? "Genera la venta con el precio pactado, sin volver a descontar stock." : "Cobrá el saldo pendiente para poder facturar."}
-                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {facturando ? "Facturando…" : "Facturar / Convertir en venta"}
-              </button>
+              {selPend.length > 0 && (
+                <button
+                  onClick={() => facturar(selPend.map((it) => it.id))}
+                  disabled={!selCubierto || facturando}
+                  title={selCubierto ? "Factura sólo los productos seleccionados al precio pactado, sin volver a descontar stock. Los demás quedan en guarda." : "El pago acumulado no cubre los productos seleccionados."}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {facturando ? "Facturando…" : `Facturar seleccionados (${selPend.length})`}
+                </button>
+              )}
+              {itemsPendientes.length > 0 && (
+                <button
+                  onClick={() => facturar(null)}
+                  disabled={!todoCubierto || facturando}
+                  title={todoCubierto ? "Factura todos los productos pendientes al precio pactado." : "Cobrá el saldo para facturar todo lo pendiente."}
+                  className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {facturando ? "Facturando…" : "Facturar todo lo pendiente"}
+                </button>
+              )}
               <button onClick={cancelar} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100">Cancelar</button>
             </div>
-            {!saldoCero && (
-              <p className="text-[11px] text-amber-600">Cobrá el saldo ({fmtGs(header.saldo)}) para habilitar la facturación.</p>
+            {selPend.length > 0 && !selCubierto && (
+              <p className="text-[11px] text-amber-600">Lo pagado no cubre lo seleccionado ({fmtGs(totalSeleccionado)}). Registrá {fmtGs(totalSeleccionado - disponible)} más para facturarlos.</p>
+            )}
+            {selPend.length > 0 && selCubierto && (
+              <p className="text-[11px] text-slate-500">Seleccionados: {selPend.length} · {fmtGs(totalSeleccionado)} (cubierto por lo pagado).</p>
+            )}
+            {selPend.length === 0 && !todoCubierto && (
+              <p className="text-[11px] text-amber-600">Podés facturar por partes: seleccioná los productos que se lleva el cliente, o cobrá el saldo ({fmtGs(header.saldo)}) para facturar todo.</p>
             )}
           </div>
         )}
@@ -127,9 +169,23 @@ export default function ReservaDetallePage() {
           <table className="w-full min-w-[640px] text-sm">
             <thead className="border-b border-slate-200 bg-slate-50">
               <tr>
+                {activa && (
+                  <th className="w-10 px-3 py-2.5 text-center">
+                    {itemsPendientes.length > 0 && (
+                      <input
+                        type="checkbox"
+                        checked={selPend.length === itemsPendientes.length && itemsPendientes.length > 0}
+                        onChange={toggleTodos}
+                        title="Seleccionar todos los productos en guarda"
+                        className="h-4 w-4 rounded border-slate-300 accent-emerald-600"
+                      />
+                    )}
+                  </th>
+                )}
                 <th className="px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-500">Producto</th>
                 <th className="px-4 py-2.5 text-right text-[11px] font-bold uppercase tracking-wide text-slate-500">Cant.</th>
                 <th className="px-4 py-2.5 text-right text-[11px] font-bold uppercase tracking-wide text-slate-500">Entregado</th>
+                <th className="px-4 py-2.5 text-center text-[11px] font-bold uppercase tracking-wide text-slate-500">Estado</th>
                 <th className="px-4 py-2.5 text-right text-[11px] font-bold uppercase tracking-wide text-slate-500">Total</th>
                 <th className="px-4 py-2.5 text-right text-[11px] font-bold uppercase tracking-wide text-slate-500"></th>
               </tr>
@@ -137,14 +193,36 @@ export default function ReservaDetallePage() {
             <tbody className="divide-y divide-slate-100">
               {items.map((it) => {
                 const pend = it.cantidad - it.cantidad_entregada;
+                const facturado = !!it.venta_id;
+                const checked = seleccionados.has(it.id);
                 return (
-                  <tr key={it.id} className="hover:bg-slate-50/50">
+                  <tr key={it.id} className={`hover:bg-slate-50/50 ${checked ? "bg-emerald-50/40" : ""}`}>
+                    {activa && (
+                      <td className="px-3 py-2.5 text-center">
+                        {!facturado && (
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleSel(it.id)}
+                            title="Seleccionar para facturar este producto"
+                            className="h-4 w-4 rounded border-slate-300 accent-emerald-600"
+                          />
+                        )}
+                      </td>
+                    )}
                     <td className="px-4 py-2.5 font-medium text-slate-800">{it.producto_nombre}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">{it.cantidad}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{it.cantidad_entregada}{pend > 0 ? <span className="text-amber-600"> ({pend} en guarda)</span> : <span className="text-emerald-600"> ✓</span>}</td>
+                    <td className="px-4 py-2.5 text-center">
+                      {facturado ? (
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700" title="Este producto ya fue facturado.">Facturado{it.venta_numero ? ` · ${it.venta_numero}` : ""}</span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">En guarda</span>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-slate-900">{fmtGs(it.total)}</td>
                     <td className="px-4 py-2.5 text-right">
-                      {activa && pend > 0 && (
+                      {activa && !facturado && pend > 0 && (
                         <button onClick={() => entregar(it.id, pend)} className="rounded-md border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">Entregar</button>
                       )}
                     </td>
@@ -186,7 +264,7 @@ export default function ReservaDetallePage() {
       </div>
 
       {header.observaciones && <p className="text-sm text-slate-500">Observaciones: {header.observaciones}</p>}
-      <p className="text-xs text-slate-400">Al facturar, se genera la venta con el precio pactado y NO se vuelve a descontar stock (la mercadería ya salió al crear la guarda). Requiere saldo en 0 — los anticipos ya entraron a caja.</p>
+      <p className="text-xs text-slate-400">Podés facturar los productos por partes: seleccioná los que se lleva el cliente y facturálos: cada uno se factura con el precio pactado, siempre que el pago acumulado lo cubra. Los demás quedan en guarda. NO se vuelve a descontar stock (la mercadería ya salió al crear la guarda) y los anticipos ya entraron a caja.</p>
 
       {pagoOpen && <PagoModal reservaId={id} saldo={header.saldo} onClose={() => setPagoOpen(false)} onDone={() => { setPagoOpen(false); void cargar(); }} />}
     </div>
