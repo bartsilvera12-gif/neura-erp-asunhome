@@ -347,10 +347,10 @@ export async function facturarReservaPg(
     // 1) Bloquear la guarda (serialización): nadie más la factura en paralelo.
     const rQ = await client.query<{
       numero_control: string; estado: string; cliente_id: string | null;
-      pagado: string; venta_id: string | null; moneda: string | null;
+      pagado: string; venta_id: string | null;
     }>(
       `SELECT numero_control, estado, cliente_id::text AS cliente_id,
-              pagado::text AS pagado, venta_id::text AS venta_id, moneda
+              pagado::text AS pagado, venta_id::text AS venta_id
          FROM ${tR} WHERE id = $1::uuid AND empresa_id = $2::uuid FOR UPDATE`,
       [reservaId, empresaId]
     );
@@ -442,7 +442,7 @@ export async function facturarReservaPg(
        VALUES ($1::uuid,$2::uuid,$3,$4,1,$5::numeric,$6::numeric,$7::numeric,'completada','CONTADO','efectivo',NULL, now(),
                $8,$9::uuid,$10)
        RETURNING id::text`,
-      [empresaId, r.cliente_id, numeroControl, (r.moneda || "GS"), subtotal, montoIva, total, obs, user.id, user.nombre]
+      [empresaId, r.cliente_id, numeroControl, "GS", subtotal, montoIva, total, obs, user.id, user.nombre]
     );
     const ventaId = String(insV.rows[0].id);
 
