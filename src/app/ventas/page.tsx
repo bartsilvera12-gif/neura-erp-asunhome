@@ -394,6 +394,15 @@ export default function VentasPage() {
                           >
                             Imprimir
                           </a>
+                          <a
+                            href={`/api/ventas/${v.id}/factura-preimpresa`}
+                            target="_blank"
+                            rel="noopener"
+                            className="inline-flex items-center justify-center rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100 transition-colors"
+                            title="Imprimir sobre la factura preimpresa de ASUNHOME (solo los datos, 3 copias). Agregá ?calibrar=1 en dev para ver la plantilla de fondo."
+                          >
+                            Factura preimpresa
+                          </a>
                           {/* Puente venta→factura: si la venta tiene factura ERP, link al
                               detalle /facturas/[id] (panel SIFEN: firma/envío/KUDE). */}
                           {v.factura_id && (

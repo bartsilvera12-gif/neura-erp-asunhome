@@ -1,0 +1,159 @@
+/**
+ * Factura PREIMPRESA de ASUNHOME: imprime SOLO los datos variables encima de la
+ * hoja física preimpresa (216 × 330 mm, 3 copias: Original/Duplicado/Triplicado).
+ *
+ * GET /api/ventas/[id]/factura-preimpresa
+ *   ?ver=1       → no dispara impresión automática (revisar en pantalla)
+ *   ?calibrar=1  → modo calibración: muestra la plantilla de fondo (solo dev).
+ *                  En impresión real la plantilla NUNCA se imprime.
+ *
+ * Reutiliza la misma obtención de datos que el comprobante A4. NO toca lógica de
+ * venta/stock/caja/numeración/impuestos: es exclusivamente maquetación.
+ */
+import { NextRequest, NextResponse } from "next/server";
+import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
+import {
+  renderFacturaPreimpresa,
+  type FacturaPreimpresaData,
+  type FacturaPreimpresaItem,
+} from "@/lib/facturacion/preimpresa/factura-preimpresa-layout";
+
+/** Fecha corta dd/mm/aaaa forzada a hora de Paraguay (UTC-3). */
+function fechaCorta(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const py = new Date(d.getTime() - 3 * 60 * 60 * 1000);
+    const dd = String(py.getUTCDate()).padStart(2, "0");
+    const mm = String(py.getUTCMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}/${py.getUTCFullYear()}`;
+  } catch {
+    return "";
+  }
+}
+
+function metodoLabel(m: string | null | undefined): string {
+  switch (m) {
+    case "efectivo": return "EFECTIVO";
+    case "transferencia": return "TRANSFERENCIA";
+    case "tarjeta": return "TARJETA";
+    case "mixto": return "MIXTO";
+    default: return String(m ?? "").toUpperCase();
+  }
+}
+
+export async function GET(request: NextRequest, ctxParams: { params: Promise<{ id: string }> }) {
+  try {
+    const { id: ventaId } = await ctxParams.params;
+    const ctx = await getTenantSupabaseFromAuth(request);
+    if (!ctx) return new NextResponse("Unauthorized", { status: 401 });
+    const sb = ctx.supabase;
+    const empresaId = ctx.auth.empresa_id;
+
+    const url = new URL(request.url);
+    const calibrar = url.searchParams.get("calibrar") === "1";
+    const ver = url.searchParams.get("ver") === "1";
+
+    // 1) Venta
+    const { data: venta } = await sb
+      .from("ventas")
+      .select("id, numero_control, fecha, subtotal, monto_iva, total, tipo_venta, plazo_dias, metodo_pago, cliente_id, nota_remision_numero, genera_nota_remision, observaciones, estado")
+      .eq("id", ventaId)
+      .eq("empresa_id", empresaId)
+      .maybeSingle();
+    if (!venta) return new NextResponse("Venta no encontrada", { status: 404 });
+    const v = venta as Record<string, unknown>;
+
+    // 2) Ítems
+    const { data: items } = await sb
+      .from("ventas_items")
+      .select("producto_nombre, sku, cantidad, precio_venta, tipo_iva, subtotal, monto_iva, total_linea")
+      .eq("venta_id", ventaId)
+      .eq("empresa_id", empresaId);
+
+    // 2b) Pagos (para forma de pago)
+    const { data: pagosRows } = await sb
+      .from("ventas_pagos_detalle")
+      .select("metodo_pago, monto")
+      .eq("venta_id", ventaId)
+      .eq("empresa_id", empresaId);
+    const pagos = (pagosRows ?? []) as Array<{ metodo_pago: string; monto: number | string }>;
+
+    // 3) Cliente (opcional)
+    let cliente: { nombre: string; ruc: string; direccion: string } = { nombre: "", ruc: "", direccion: "" };
+    if (v.cliente_id) {
+      const { data: c } = await sb
+        .from("clientes")
+        .select("empresa, nombre_contacto, nombre, ruc, documento, direccion")
+        .eq("empresa_id", empresaId)
+        .eq("id", v.cliente_id as string)
+        .maybeSingle();
+      if (c) {
+        const cc = c as Record<string, string | null>;
+        cliente = {
+          nombre: cc.empresa || cc.nombre_contacto || cc.nombre || "",
+          ruc: cc.ruc || cc.documento || "",
+          direccion: cc.direccion || "",
+        };
+      }
+    }
+
+    // 4) Ítems → columnas EXENTA / IVA 5% / IVA 10% (misma regla que comprobante-a4)
+    const filas: FacturaPreimpresaItem[] = (items ?? []).map((it: Record<string, unknown>) => {
+      const total = Number(it.total_linea ?? 0);
+      const ivaTipo = String(it.tipo_iva ?? "10%");
+      return {
+        cantidad: Number(it.cantidad ?? 0),
+        descripcion: String(it.producto_nombre ?? ""),
+        precioUnitario: Number(it.precio_venta ?? 0),
+        exenta: ivaTipo === "EXENTA" ? total : 0,
+        iva5: ivaTipo === "5%" ? total : 0,
+        iva10: ivaTipo === "10%" ? total : 0,
+      };
+    });
+
+    const totExenta = filas.reduce((s, f) => s + f.exenta, 0);
+    const totIva5 = filas.reduce((s, f) => s + f.iva5, 0);
+    const totIva10 = filas.reduce((s, f) => s + f.iva10, 0);
+    const totalPagar = totExenta + totIva5 + totIva10;
+    // Liquidación del IVA (monto de impuesto incluido en cada tramo)
+    const liq5 = Math.round((totIva5 / 1.05) * 0.05);
+    const liq10 = Math.round((totIva10 / 1.1) * 0.1);
+    const totalIva = liq5 + liq10;
+
+    const notaRem = v.genera_nota_remision === true && v.nota_remision_numero
+      ? String(v.nota_remision_numero)
+      : "";
+    const condicion: "CONTADO" | "CREDITO" = v.tipo_venta === "CREDITO" ? "CREDITO" : "CONTADO";
+    const formaPago = pagos.length > 1 ? "MIXTO" : metodoLabel(String(v.metodo_pago ?? pagos[0]?.metodo_pago ?? ""));
+
+    const data: FacturaPreimpresaData = {
+      fecha: fechaCorta(String(v.fecha ?? "")),
+      nombre: cliente.nombre,
+      domicilio: cliente.direccion,
+      observacion: String(v.observaciones ?? ""),
+      condicion,
+      ruc: cliente.ruc,
+      formaPago,
+      notaRemision: notaRem,
+      // numeroFactura queda sin setear: la hoja ya viene numerada (ver CALIB).
+      items: filas,
+      totExenta, totIva5, totIva10,
+      totalPagar,
+      liq5, liq10, totalIva,
+    };
+
+    const html = renderFacturaPreimpresa(data, {
+      calibrar,
+      ver,
+      bgUrl: "/brand/factura-preimpresa-asunhome.png",
+    });
+
+    return new NextResponse(html, {
+      status: 200,
+      headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+    });
+  } catch (err) {
+    console.error("[/api/ventas/[id]/factura-preimpresa]", err instanceof Error ? err.message : err);
+    return new NextResponse("Error interno", { status: 500 });
+  }
+}
