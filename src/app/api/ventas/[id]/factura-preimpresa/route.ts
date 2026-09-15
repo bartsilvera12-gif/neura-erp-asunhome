@@ -81,11 +81,11 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
     const pagos = (pagosRows ?? []) as Array<{ metodo_pago: string; monto: number | string }>;
 
     // 3) Cliente (opcional)
-    let cliente: { nombre: string; ruc: string; direccion: string } = { nombre: "", ruc: "", direccion: "" };
+    let cliente: { nombre: string; ruc: string; direccion: string; telefono: string } = { nombre: "", ruc: "", direccion: "", telefono: "" };
     if (v.cliente_id) {
       const { data: c } = await sb
         .from("clientes")
-        .select("empresa, nombre_contacto, nombre, ruc, documento, direccion")
+        .select("empresa, nombre_contacto, nombre, ruc, documento, direccion, telefono")
         .eq("empresa_id", empresaId)
         .eq("id", v.cliente_id as string)
         .maybeSingle();
@@ -95,6 +95,7 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
           nombre: cc.empresa || cc.nombre_contacto || cc.nombre || "",
           ruc: cc.ruc || cc.documento || "",
           direccion: cc.direccion || "",
+          telefono: (cc.telefono || "").trim(),
         };
       }
     }
@@ -128,11 +129,20 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
     const condicion: "CONTADO" | "CREDITO" = v.tipo_venta === "CREDITO" ? "CREDITO" : "CONTADO";
     const formaPago = pagos.length > 1 ? "MIXTO" : metodoLabel(String(v.metodo_pago ?? pagos[0]?.metodo_pago ?? ""));
 
+    // Observación: se conserva la manual (si hay) y SE AGREGA el teléfono del
+    // cliente (de su ficha), para que los choferes puedan contactarlo en la
+    // entrega. No reemplaza la observación cargada.
+    const obsPartes: string[] = [];
+    const obsManual = String(v.observaciones ?? "").trim();
+    if (obsManual) obsPartes.push(obsManual);
+    if (cliente.telefono) obsPartes.push(`Teléfono del cliente: ${cliente.telefono}`);
+    const observacion = obsPartes.join("  ·  ");
+
     const data: FacturaPreimpresaData = {
       fecha: fechaCorta(String(v.fecha ?? "")),
       nombre: cliente.nombre,
       domicilio: cliente.direccion,
-      observacion: String(v.observaciones ?? ""),
+      observacion,
       condicion,
       ruc: cliente.ruc,
       formaPago,
