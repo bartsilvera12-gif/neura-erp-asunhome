@@ -3,9 +3,9 @@
  * hoja física preimpresa (216 × 330 mm, 3 copias: Original/Duplicado/Triplicado).
  *
  * GET /api/ventas/[id]/factura-preimpresa
- *   ?ver=1       → no dispara impresión automática (revisar en pantalla)
- *   ?calibrar=1  → modo calibración: muestra la plantilla de fondo (solo dev).
- *                  En impresión real la plantilla NUNCA se imprime.
+ *   (por defecto) → PDF de 216×330 mm exactos, listo para imprimir a "Tamaño real"
+ *                   sin que el navegador lo encoja.
+ *   ?calibrar=1   → modo calibración (solo dev): HTML con la plantilla de fondo.
  *
  * Reutiliza la misma obtención de datos que el comprobante A4. NO toca lógica de
  * venta/stock/caja/numeración/impuestos: es exclusivamente maquetación.
@@ -17,6 +17,7 @@ import {
   type FacturaPreimpresaData,
   type FacturaPreimpresaItem,
 } from "@/lib/facturacion/preimpresa/factura-preimpresa-layout";
+import { renderFacturaPreimpresaPdf } from "@/lib/facturacion/preimpresa/factura-preimpresa-pdf";
 
 /** Fecha corta dd/mm/aaaa forzada a hora de Paraguay (UTC-3). */
 function fechaCorta(iso: string): string {
@@ -142,15 +143,26 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
       liq5, liq10, totalIva,
     };
 
-    const html = renderFacturaPreimpresa(data, {
-      calibrar,
-      ver,
-      bgUrl: "/brand/factura-preimpresa-asunhome.png",
-    });
+    // Modo calibración (solo dev): HTML con la plantilla de fondo, para verificar
+    // en pantalla. En uso real se devuelve un PDF a 216×330 mm exactos, que se
+    // imprime a "Tamaño real" sin encogerse (a diferencia del HTML del navegador).
+    if (calibrar) {
+      const html = renderFacturaPreimpresa(data, { calibrar: true, ver, bgUrl: "/brand/factura-preimpresa-asunhome.png" });
+      return new NextResponse(html, {
+        status: 200,
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+      });
+    }
 
-    return new NextResponse(html, {
+    const numero = String(v.numero_control ?? "venta").replace(/[^A-Za-z0-9_-]/g, "");
+    const pdf = await renderFacturaPreimpresaPdf(data);
+    return new NextResponse(Buffer.from(pdf), {
       status: 200,
-      headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `inline; filename="factura-${numero}.pdf"`,
+        "Cache-Control": "no-store",
+      },
     });
   } catch (err) {
     console.error("[/api/ventas/[id]/factura-preimpresa]", err instanceof Error ? err.message : err);
