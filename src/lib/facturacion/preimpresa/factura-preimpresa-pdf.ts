@@ -83,6 +83,7 @@ export async function renderFacturaPreimpresaPdf(d: FacturaPreimpresaData): Prom
     if (d.totIva5 > 0) draw(to.subIva5.x, to.subIva5.y + dy, fmtGs(d.totIva5), to.subIva5.align);
     if (d.totIva10 > 0) draw(to.subIva10.x, to.subIva10.y + dy, fmtGs(d.totIva10), to.subIva10.align);
     draw(to.totalPagar.x, to.totalPagar.y + dy, fmtGs(d.totalPagar), to.totalPagar.align);
+    if (d.totalLetras) draw(to.totalLetras.x, to.totalLetras.y + dy, d.totalLetras, to.totalLetras.align);
     if (d.liq5 > 0) draw(to.liq5.x, to.liq5.y + dy, fmtGs(d.liq5), to.liq5.align);
     if (d.liq10 > 0) draw(to.liq10.x, to.liq10.y + dy, fmtGs(d.liq10), to.liq10.align);
     draw(to.totalIva.x, to.totalIva.y + dy, fmtGs(d.totalIva), to.totalIva.align);

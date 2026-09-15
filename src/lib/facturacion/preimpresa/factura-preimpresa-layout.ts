@@ -90,6 +90,7 @@ export const CALIB = {
     subIva5: { x: 187, y: 88.7, align: "right" } as CampoPos,
     subIva10: { x: 207, y: 88.7, align: "right" } as CampoPos,
     totalPagar: { x: 207, y: 93.4, align: "right" } as CampoPos, // TOTAL A PAGAR Gs.
+    totalLetras: { x: 52, y: 93.4, align: "left" } as CampoPos, // importe en letras (izq. del total)
     liq5: { x: 78, y: 98.2, align: "left" } as CampoPos, // (5%) ___
     liq10: { x: 138, y: 98.2, align: "left" } as CampoPos, // (10%) ___
     totalIva: { x: 207, y: 98.2, align: "right" } as CampoPos, // TOTAL IVA:
@@ -120,6 +121,7 @@ export interface FacturaPreimpresaData {
   totIva5: number;
   totIva10: number;
   totalPagar: number;
+  totalLetras?: string; // importe total en letras (ej. "TRES MILLONES ... GUARANIES")
   liq5: number;
   liq10: number;
   totalIva: number;
@@ -200,6 +202,7 @@ function renderBloque(d: FacturaPreimpresaData, dy: number): string {
   if (d.totIva5 > 0) parts.push(campo(to.subIva5, dy, fmtGs(d.totIva5)));
   if (d.totIva10 > 0) parts.push(campo(to.subIva10, dy, fmtGs(d.totIva10)));
   parts.push(campo(to.totalPagar, dy, fmtGs(d.totalPagar)));
+  if (d.totalLetras) parts.push(campo(to.totalLetras, dy, d.totalLetras));
   if (d.liq5 > 0) parts.push(campo(to.liq5, dy, fmtGs(d.liq5)));
   if (d.liq10 > 0) parts.push(campo(to.liq10, dy, fmtGs(d.liq10)));
   parts.push(campo(to.totalIva, dy, fmtGs(d.totalIva)));

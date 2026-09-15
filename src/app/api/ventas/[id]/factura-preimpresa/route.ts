@@ -18,6 +18,7 @@ import {
   type FacturaPreimpresaItem,
 } from "@/lib/facturacion/preimpresa/factura-preimpresa-layout";
 import { renderFacturaPreimpresaPdf } from "@/lib/facturacion/preimpresa/factura-preimpresa-pdf";
+import { numeroALetras } from "@/lib/documentos/numero-a-letras";
 
 /** Fecha corta dd/mm/aaaa forzada a hora de Paraguay (UTC-3). */
 function fechaCorta(iso: string): string {
@@ -140,6 +141,7 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
       items: filas,
       totExenta, totIva5, totIva10,
       totalPagar,
+      totalLetras: `${numeroALetras(totalPagar)} GUARANIES`,
       liq5, liq10, totalIva,
     };
 
