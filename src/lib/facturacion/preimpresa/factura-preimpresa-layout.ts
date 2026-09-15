@@ -38,7 +38,7 @@ export const CALIB = {
    * rápida contra la impresora física: si todo sale corrido, ajustar acá una
    * sola vez (ej. y:+1.5 baja todo 1.5 mm; x:-1 corre todo 1 mm a la izquierda).
    */
-  offset: { x: -2, y: 3 },
+  offset: { x: 0, y: 0 },
 
   /** Tipografía de los datos variables. */
   font: { family: "Arial, Helvetica, sans-serif", sizePt: 8.5 },
@@ -86,14 +86,14 @@ export const CALIB = {
 
   /** Totales (fila SUBTOTAL 89.9, TOTAL A PAGAR 94.3, LIQUIDACIÓN 99.1). */
   totales: {
-    subExenta: { x: 167, y: 88.7, align: "right" } as CampoPos,
-    subIva5: { x: 187, y: 88.7, align: "right" } as CampoPos,
-    subIva10: { x: 207, y: 88.7, align: "right" } as CampoPos,
-    totalPagar: { x: 207, y: 93.4, align: "right" } as CampoPos, // TOTAL A PAGAR Gs.
-    totalLetras: { x: 52, y: 93.4, align: "left" } as CampoPos, // importe en letras (izq. del total)
-    liq5: { x: 78, y: 98.2, align: "left" } as CampoPos, // (5%) ___
-    liq10: { x: 138, y: 98.2, align: "left" } as CampoPos, // (10%) ___
-    totalIva: { x: 207, y: 98.2, align: "right" } as CampoPos, // TOTAL IVA:
+    subExenta: { x: 167, y: 90.7, align: "right" } as CampoPos,
+    subIva5: { x: 187, y: 90.7, align: "right" } as CampoPos,
+    subIva10: { x: 207, y: 90.7, align: "right" } as CampoPos,
+    totalPagar: { x: 207, y: 95.4, align: "right" } as CampoPos, // TOTAL A PAGAR Gs.
+    totalLetras: { x: 52, y: 95.4, align: "left" } as CampoPos, // importe en letras (izq. del total)
+    liq5: { x: 78, y: 100.2, align: "left" } as CampoPos, // (5%) ___
+    liq10: { x: 138, y: 100.2, align: "left" } as CampoPos, // (10%) ___
+    totalIva: { x: 207, y: 100.2, align: "right" } as CampoPos, // TOTAL IVA:
   },
 };
 
