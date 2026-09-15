@@ -120,6 +120,35 @@ export async function GET(request: NextRequest) {
     const incluirEliminados = sp.get("incluir_eliminados") === "1";
     const planActivo = sp.get("plan_activo") === "1";
 
+    // ── Búsqueda server-side (typeahead) ────────────────────────────────────
+    // Con `?q=…` filtra en el servidor por nombre, razón social, RUC, documento
+    // (cédula) y teléfono, con límite. Trae solo lo necesario para un selector
+    // (sin los enriquecimientos pesados), de modo que escale a miles de clientes
+    // sin cargarlos todos al navegador.
+    const rawQ = (sp.get("q") ?? "").trim();
+    if (rawQ.length > 0) {
+      // Sanitizar: evitar romper el filtro .or() de PostgREST (comas, paréntesis,
+      // comodines) — se conserva solo texto/dígitos/espacios/.-.
+      const safe = rawQ.replace(/[^\p{L}\p{N} .\-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 60);
+      if (!safe) return NextResponse.json(successResponse([]));
+      const limit = Math.min(Math.max(Number(sp.get("limit")) || 25, 1), 50);
+      const pat = `%${safe}%`;
+      const { data, error } = await supabase
+        .from("clientes")
+        .select("id, empresa, nombre_contacto, nombre, ruc, documento, telefono, direccion, usa_nota_remision")
+        .eq("empresa_id", auth.empresa_id)
+        .is("deleted_at", null)
+        .or(
+          `nombre.ilike.${pat},nombre_contacto.ilike.${pat},empresa.ilike.${pat},ruc.ilike.${pat},documento.ilike.${pat},telefono.ilike.${pat}`
+        )
+        .order("nombre", { ascending: true })
+        .limit(limit);
+      if (error) {
+        return NextResponse.json(errorResponse(error.message), { status: 400 });
+      }
+      return NextResponse.json(successResponse(data ?? []));
+    }
+
     let q = supabase
       .from("clientes")
       .select("*")

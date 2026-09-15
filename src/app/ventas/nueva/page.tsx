@@ -572,26 +572,33 @@ export default function NuevaVentaPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Cargar clientes (buscador opcional de cliente en la venta).
+  // Buscador de cliente (typeahead server-side). Consulta /api/clientes?q=… con
+  // debounce y trae SOLO las coincidencias (por nombre, cédula/RUC o teléfono),
+  // así escala a miles de clientes sin cargarlos todos. Con <2 letras no busca y
+  // conserva lo que haya (para no perder el cliente ya seleccionado).
   useEffect(() => {
+    const term = clienteQuery.trim();
+    if (term.length < 2) return;
     let cancelled = false;
-    fetch("/api/clientes", { credentials: "include", cache: "no-store" })
-      .then((r) => r.json())
-      .then((j) => {
-        if (cancelled || !j?.success || !Array.isArray(j.data)) return;
-        const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-        const lite: ClienteLite[] = (j.data as Record<string, unknown>[]).map((r) => ({
-          id: String(r.id),
-          label: s(r.empresa) || s(r.nombre_contacto) || s(r.nombre) || "Cliente",
-          ruc: s(r.ruc) || null,
-          telefono: s(r.telefono) || null,
-          usa_nota_remision: r.usa_nota_remision === true,
-        }));
-        setClientes(lite);
-      })
-      .catch(() => { /* el buscador de cliente es opcional, no bloquea la venta */ });
-    return () => { cancelled = true; };
-  }, []);
+    const t = setTimeout(() => {
+      fetch(`/api/clientes?q=${encodeURIComponent(term)}&limit=25`, { credentials: "include", cache: "no-store" })
+        .then((r) => r.json())
+        .then((j) => {
+          if (cancelled || !j?.success || !Array.isArray(j.data)) return;
+          const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+          const lite: ClienteLite[] = (j.data as Record<string, unknown>[]).map((r) => ({
+            id: String(r.id),
+            label: s(r.empresa) || s(r.nombre_contacto) || s(r.nombre) || "Cliente",
+            ruc: s(r.ruc) || s(r.documento) || null,
+            telefono: s(r.telefono) || null,
+            usa_nota_remision: r.usa_nota_remision === true,
+          }));
+          setClientes(lite);
+        })
+        .catch(() => { /* el buscador de cliente es opcional, no bloquea la venta */ });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [clienteQuery]);
 
   // Cargar vendedores + preseleccionar al usuario logueado si es vendedor.
   useEffect(() => {
@@ -775,10 +782,10 @@ export default function NuevaVentaPage() {
 
   // Cliente (opcional) — selección + filtrado del buscador.
   const clienteSel = clientes.find((c) => c.id === clienteId) ?? null;
-  const clientesFiltrados = (clienteQuery.trim() === ""
-    ? clientes
-    : clientes.filter((c) => productoMatchesQuery(clienteQuery, c.label, c.ruc))
-  ).slice(0, 50);
+  // El servidor ya filtró por nombre/cédula/RUC/teléfono (typeahead): acá solo se
+  // muestran los resultados (sin re-filtrar por label, que ocultaría coincidencias
+  // por cédula). Con <2 letras no se muestra nada viejo (se pide escribir).
+  const clientesFiltrados = clienteQuery.trim().length < 2 ? [] : clientes.slice(0, 50);
 
   // Cobro: entidad seleccionada + filtrado por código/nombre (tokens).
   const entidadSel = entidades.find((e) => e.id === pagoEntidadId) ?? null;
@@ -1145,7 +1152,7 @@ export default function NuevaVentaPage() {
                   value={clienteSel ? clienteSel.label : clienteQuery}
                   onChange={(e) => { setClienteId(""); setClienteQuery(e.target.value); setClienteOpen(true); }}
                   onFocus={() => setClienteOpen(true)}
-                  placeholder="Buscar por nombre o RUC…"
+                  placeholder="Buscar por nombre o cédula…"
                   className={`${inputClass} ${clienteSel ? "font-medium" : ""}`}
                 />
                 {clienteSel && (
@@ -1168,7 +1175,11 @@ export default function NuevaVentaPage() {
               {clienteOpen && !clienteSel && (
                 <div className="absolute z-20 mt-1 w-full max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
                   {clientesFiltrados.length === 0 ? (
-                    <p className="px-3 py-2 text-xs text-gray-400">Sin clientes que coincidan.</p>
+                    <p className="px-3 py-2 text-xs text-gray-400">
+                      {clienteQuery.trim().length < 2
+                        ? "Escribí al menos 2 letras (nombre o cédula)…"
+                        : `Sin clientes que coincidan con "${clienteQuery.trim()}".`}
+                    </p>
                   ) : (
                     clientesFiltrados.map((c) => (
                       <button

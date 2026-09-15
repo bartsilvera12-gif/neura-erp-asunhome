@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import EdgeScrollArea from "@/components/ui/EdgeScrollArea";
 import { FancySelect } from "@/components/ui/FancySelect";
+import ClienteSelectorBuscador from "@/components/clientes/ClienteSelectorBuscador";
 import MobileFab from "@/components/ui/MobileFab";
 import { getVentas } from "@/lib/ventas/storage";
 import PedidosPendientesCaja from "./PedidosPendientesCaja";
@@ -618,8 +619,8 @@ function EditarVentaModal({
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [clientes, setClientes] = useState<{ id: string; nombre: string }[]>([]);
   const [clienteId, setClienteId] = useState<string>(venta.cliente_id ?? "");
+  const [clienteLabel, setClienteLabel] = useState<string>(venta.cliente_nombre ?? "");
   const [observaciones, setObservaciones] = useState<string>(venta.observaciones ?? "");
   const [vendedores, setVendedores] = useState<{ id: string; nombre: string }[]>([]);
   const [vendedorId, setVendedorId] = useState<string>(venta.vendedor_id ?? "");
@@ -629,14 +630,6 @@ function EditarVentaModal({
   useEffect(() => {
     let vivo = true;
     (async () => {
-      try {
-        const { getClientes, clienteNombre } = await import("@/lib/clientes/storage");
-        const cs = await getClientes();
-        if (!vivo) return;
-        setClientes(cs.map((c) => ({ id: c.id, nombre: clienteNombre(c) })));
-      } catch {
-        /* si falla, el selector queda con solo el cliente actual */
-      }
       try {
         const rv = await fetch("/api/comisiones/vendedores", { credentials: "include", cache: "no-store" });
         const jv = await rv.json();
@@ -676,15 +669,6 @@ function EditarVentaModal({
     }
   }
 
-  const opciones = [
-    { value: "", label: "— Sin cliente —" },
-    ...clientes.map((c) => ({ value: c.id, label: c.nombre })),
-  ];
-  // Si el cliente actual no vino en el listado (raro), lo agrego para no perderlo.
-  if (venta.cliente_id && !clientes.some((c) => c.id === venta.cliente_id)) {
-    opciones.push({ value: venta.cliente_id, label: venta.cliente_nombre ?? "Cliente actual" });
-  }
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
@@ -704,11 +688,11 @@ function EditarVentaModal({
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Cliente</span>
             <div className="mt-1">
-              <FancySelect
+              <ClienteSelectorBuscador
                 value={clienteId}
-                onChange={(v) => setClienteId(v)}
-                options={opciones}
-                placeholder="Buscar cliente…"
+                label={clienteLabel}
+                onChange={(id, cliente) => { setClienteId(id); setClienteLabel(cliente?.nombre ?? ""); }}
+                placeholder="Buscar por nombre o cédula…"
               />
             </div>
           </label>
