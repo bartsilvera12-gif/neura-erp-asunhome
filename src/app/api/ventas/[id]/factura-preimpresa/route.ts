@@ -132,11 +132,17 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
     // Observación: se conserva la manual (si hay) y SE AGREGA el teléfono del
     // cliente (de su ficha), para que los choferes puedan contactarlo en la
     // entrega. No reemplaza la observación cargada.
+    // NO se imprime la referencia interna de guarda ("Facturación de guarda
+    // RES-…"): esa relación se mantiene solo en el registro de la venta para
+    // trazabilidad, pero no debe salir en la factura.
     const obsPartes: string[] = [];
-    const obsManual = String(v.observaciones ?? "").trim();
+    const obsManual = String(v.observaciones ?? "")
+      .replace(/facturaci[oó]n de guarda\s+RES-\d+/gi, "")
+      .replace(/^[\s·,-]+|[\s·,-]+$/g, "")
+      .trim();
     if (obsManual) obsPartes.push(obsManual);
-    if (cliente.telefono) obsPartes.push(`Teléfono del cliente: ${cliente.telefono}`);
-    const observacion = obsPartes.join("  ·  ");
+    if (cliente.telefono) obsPartes.push(`Teléfono: ${cliente.telefono}`);
+    const observacion = obsPartes.join(" · ");
 
     const data: FacturaPreimpresaData = {
       fecha: fechaCorta(String(v.fecha ?? "")),
