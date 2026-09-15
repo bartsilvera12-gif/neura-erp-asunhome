@@ -38,7 +38,7 @@ export const CALIB = {
    * rápida contra la impresora física: si todo sale corrido, ajustar acá una
    * sola vez (ej. y:+1.5 baja todo 1.5 mm; x:-1 corre todo 1 mm a la izquierda).
    */
-  offset: { x: 0, y: 0 },
+  offset: { x: -2, y: 3 },
 
   /** Tipografía de los datos variables. */
   font: { family: "Arial, Helvetica, sans-serif", sizePt: 8.5 },
