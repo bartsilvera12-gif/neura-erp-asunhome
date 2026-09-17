@@ -45,7 +45,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS factura_autoimpresor_numero_uq
 GRANT SELECT, INSERT, UPDATE, DELETE ON asunhome.factura_autoimpresor TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON asunhome.factura_autoimpresor TO service_role;
 
--- RLS: mismo patrón que el resto del ERP (public.puede_acceder_empresa).
+-- RLS: mismo patrón que las tablas nuevas del schema (ver PARTE 5 del
+-- 00_setup_schema_asunhome.sql): FOR ALL con asunhome.puede_acceder_empresa.
 ALTER TABLE asunhome.factura_autoimpresor ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS factura_autoimpresor_by_empresa ON asunhome.factura_autoimpresor;
@@ -53,17 +54,10 @@ DROP POLICY IF EXISTS "factura_autoimpresor_select" ON asunhome.factura_autoimpr
 DROP POLICY IF EXISTS "factura_autoimpresor_insert" ON asunhome.factura_autoimpresor;
 DROP POLICY IF EXISTS "factura_autoimpresor_update" ON asunhome.factura_autoimpresor;
 DROP POLICY IF EXISTS "factura_autoimpresor_delete" ON asunhome.factura_autoimpresor;
+DROP POLICY IF EXISTS "factura_autoimpresor_all" ON asunhome.factura_autoimpresor;
 
-CREATE POLICY "factura_autoimpresor_select" ON asunhome.factura_autoimpresor
-  FOR SELECT USING (public.puede_acceder_empresa(empresa_id));
-
-CREATE POLICY "factura_autoimpresor_insert" ON asunhome.factura_autoimpresor
-  FOR INSERT WITH CHECK (public.puede_acceder_empresa(empresa_id));
-
-CREATE POLICY "factura_autoimpresor_update" ON asunhome.factura_autoimpresor
-  FOR UPDATE
-  USING (public.puede_acceder_empresa(empresa_id))
-  WITH CHECK (public.puede_acceder_empresa(empresa_id));
-
-CREATE POLICY "factura_autoimpresor_delete" ON asunhome.factura_autoimpresor
-  FOR DELETE USING (public.puede_acceder_empresa(empresa_id));
+CREATE POLICY "factura_autoimpresor_all" ON asunhome.factura_autoimpresor
+  FOR ALL
+  TO authenticated
+  USING (asunhome.puede_acceder_empresa(empresa_id))
+  WITH CHECK (asunhome.puede_acceder_empresa(empresa_id));
