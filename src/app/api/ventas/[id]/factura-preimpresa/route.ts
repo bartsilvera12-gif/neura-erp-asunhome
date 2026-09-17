@@ -12,6 +12,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
+import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
 import {
   renderFacturaPreimpresa,
   type FacturaPreimpresaData,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/facturacion/preimpresa/factura-preimpresa-layout";
 import { renderFacturaPreimpresaPdf } from "@/lib/facturacion/preimpresa/factura-preimpresa-pdf";
 import { numeroALetras } from "@/lib/documentos/numero-a-letras";
+import { emitirFacturaAutoimpresor, EmisionBloqueadaError } from "@/lib/facturacion/autoimpresor/emitir-factura";
 
 /** Fecha corta dd/mm/aaaa forzada a hora de Paraguay (UTC-3). */
 function fechaCorta(iso: string): string {
@@ -54,6 +56,20 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
     const url = new URL(request.url);
     const calibrar = url.searchParams.get("calibrar") === "1";
     const ver = url.searchParams.get("ver") === "1";
+
+    // 0) Reservar (o recuperar) el número de factura preimpresa desde la
+    // config de autoimpresor. Idempotente por venta: si ya se emitió, devuelve
+    // la misma. Best-effort: si la config no está lista o no está activa, se
+    // deja pasar y la venta queda sin número (aparecerá "Sin factura" en el
+    // listado hasta que se configure y se reimprima).
+    try {
+      const schema = await fetchDataSchemaForEmpresaId(empresaId);
+      await emitirFacturaAutoimpresor(schema, empresaId, ventaId);
+    } catch (e) {
+      if (!(e instanceof EmisionBloqueadaError)) {
+        console.warn("[factura-preimpresa] emisión omitida:", e instanceof Error ? e.message : e);
+      }
+    }
 
     // 1) Venta
     const { data: venta } = await sb

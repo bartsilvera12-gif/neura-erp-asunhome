@@ -108,6 +108,24 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Facturas autoimpresor: numero_completo (formato EEE-PPP-NNNNNNN, p.ej.
+    // "001-001-0004966") reservado por venta al emitir la preimpresa. Cae como
+    // fallback cuando la venta no tiene factura ERP (SIFEN). Best-effort.
+    const numeroAutoByVentaMap = new Map<string, string>();
+    const ventaIdsForAuto = ((ventasQ.data ?? []) as VentaRow[]).map((v) => v.id);
+    if (ventaIdsForAuto.length > 0) {
+      const faQ = await ctx.supabase
+        .from("factura_autoimpresor")
+        .select("venta_id, numero_completo")
+        .eq("empresa_id", empresaId)
+        .in("venta_id", ventaIdsForAuto);
+      if (!faQ.error) {
+        for (const row of (faQ.data ?? []) as Array<{ venta_id: string; numero_completo?: string | null }>) {
+          if (row.numero_completo) numeroAutoByVentaMap.set(row.venta_id, row.numero_completo);
+        }
+      }
+    }
+
     const itemsQ = await ctx.supabase
       .from("ventas_items")
       .select(
@@ -196,7 +214,9 @@ export async function GET(request: NextRequest) {
         vendedor_id: (r as unknown as { vendedor_id?: string | null }).vendedor_id ?? null,
         vendedor_nombre: (r as unknown as { vendedor_nombre?: string | null }).vendedor_nombre ?? null,
         factura_id: r.factura_id ?? null,
-        numero_factura: r.factura_id ? numeroFacturaByIdMap.get(r.factura_id) ?? null : null,
+        numero_factura: (r.factura_id ? numeroFacturaByIdMap.get(r.factura_id) : undefined)
+          ?? numeroAutoByVentaMap.get(r.id)
+          ?? null,
         factura_estado_sifen: r.factura_id ? estadoSifenByFacturaMap.get(r.factura_id) ?? null : null,
         estado: ((): "activa" | "anulada" | "parcialmente_devuelta" | "devuelta_total" => {
           const e = (r as unknown as { estado?: string }).estado;
