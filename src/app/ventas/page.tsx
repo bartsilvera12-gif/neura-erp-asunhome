@@ -273,7 +273,7 @@ export default function VentasPage() {
           <table className="w-full min-w-[760px] lg:min-w-0 text-left text-sm">
             <thead>
               <tr className="bg-slate-50 text-slate-600 text-sm font-semibold">
-                <th className="py-3 pr-4 font-medium">Número</th>
+                <th className="py-3 pr-4 font-medium">Número de factura</th>
                 <th className="py-3 pr-4 font-medium">Productos</th>
                 <th className="hidden py-3 pr-4 text-center font-medium lg:table-cell">Ítems</th>
                 <th className="py-3 pr-4 font-medium text-right hidden lg:table-cell">Cant. total</th>
@@ -309,7 +309,11 @@ export default function VentasPage() {
                     >
                       <td className="py-4 pr-4 font-mono text-xs text-gray-500 align-middle">
                         <div className="flex items-center gap-1.5">
-                          <span>{v.numero_control}</span>
+                          {v.numero_factura ? (
+                            <span>{v.numero_factura}</span>
+                          ) : (
+                            <span className="font-sans italic text-slate-400 normal-case">Sin factura</span>
+                          )}
                           {isAnulada && (
                             <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700 no-underline">
                               Anulada
