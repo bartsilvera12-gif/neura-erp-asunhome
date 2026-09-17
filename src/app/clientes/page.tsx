@@ -1,13 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import EdgeScrollArea from "@/components/ui/EdgeScrollArea";
 import { FancySelect } from "@/components/ui/FancySelect";
 import MobileFab from "@/components/ui/MobileFab";
-import { getClientes, clienteNombre } from "@/lib/clientes/storage";
-import { productoMatchesQuery } from "@/lib/productos/token-search";
+import { getClientes, buscarClientes, clienteNombre } from "@/lib/clientes/storage";
 import type { Cliente } from "@/lib/clientes/types";
 import { etiquetaVisibleTipoServicio, type ClienteTipoServicioRow } from "@/lib/clientes/tipo-servicio-catalogo";
 import { filasTiposDesdeSistemaEstatico, fetchTiposFormCliente } from "@/lib/clientes/fetch-tipos-servicio-form";
@@ -285,6 +284,11 @@ export default function ClientesPage() {
   const [clientes,    setClientes]    = useState<Cliente[]>([]);
   const [cargando,    setCargando]    = useState(true);
   const [busqueda,    setBusqueda]    = useState("");
+  // Búsqueda server-side (escala a miles): cuando hay ≥2 caracteres, los resultados
+  // vienen de la base (nombre / cédula / RUC / teléfono) en vez de filtrar en memoria.
+  const [resultadosBusqueda, setResultadosBusqueda] = useState<Cliente[]>([]);
+  const [buscando, setBuscando] = useState(false);
+  const busquedaReqId = useRef(0);
   const [bajaOk,      setBajaOk]      = useState(false);
   const [filtroEstado, setFiltroEstado] = useState<"" | "activo" | "inactivo">("");
   const [filtroOrigen, setFiltroOrigen] = useState<"" | "CRM" | "VENTA" | "MANUAL">("");
@@ -316,6 +320,35 @@ export default function ClientesPage() {
   useEffect(() => {
     void fetchTiposFormCliente().then(setFilasTipoCatalogo);
   }, []);
+
+  // Búsqueda server-side con debounce. Se descartan respuestas fuera de orden vía
+  // un id de request incremental. Con <2 caracteres no se consulta (se muestra la
+  // lista completa ya cargada, filtrada solo por los selects).
+  useEffect(() => {
+    const term = busqueda.trim();
+    if (term.length < 2) {
+      busquedaReqId.current += 1; // invalida cualquier respuesta en vuelo
+      setBuscando(false);
+      setResultadosBusqueda([]);
+      return;
+    }
+    const reqId = ++busquedaReqId.current;
+    setBuscando(true);
+    const t = setTimeout(() => {
+      buscarClientes(term)
+        .then((data) => {
+          if (reqId !== busquedaReqId.current) return; // llegó tarde: descartar
+          setResultadosBusqueda(data);
+          setBuscando(false);
+        })
+        .catch(() => {
+          if (reqId !== busquedaReqId.current) return;
+          setResultadosBusqueda([]);
+          setBuscando(false);
+        });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [busqueda]);
 
   useEffect(() => {
     try {
@@ -357,11 +390,11 @@ export default function ClientesPage() {
     }
   }, [searchParams]);
 
-  const filtrados = clientes.filter((c) => {
-    if (busqueda.trim() && !productoMatchesQuery(
-      busqueda,
-      clienteNombre(c), c.codigo_cliente, c.email, c.telefono, c.ruc, c.ciudad
-    )) return false;
+  // Con búsqueda activa (≥2 chars) la base viene del servidor (incluye cédula/RUC
+  // y escala a miles); sin búsqueda, se usa la lista completa cargada en memoria.
+  const busquedaActiva = busqueda.trim().length >= 2;
+  const baseClientes = busquedaActiva ? resultadosBusqueda : clientes;
+  const filtrados = baseClientes.filter((c) => {
     if (filtroEstado       && c.estado              !== filtroEstado) return false;
     if (filtroOrigen       && c.origen              !== filtroOrigen) return false;
     if (filtroTipo         && c.tipo_cliente        !== filtroTipo) return false;
@@ -426,7 +459,7 @@ export default function ClientesPage() {
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm ring-1 ring-[#4FAEB2]/15 p-4 flex flex-wrap gap-3 items-center">
         <input
           type="text"
-          placeholder="Buscar por nombre, código, email, RUC..."
+          placeholder="Buscar por nombre, cédula/RUC, teléfono..."
           value={busqueda}
           onChange={(e) => setBusqueda(e.target.value)}
           className="flex-1 min-w-48 border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-[#0EA5E9] focus:outline-none transition-all"
@@ -498,8 +531,21 @@ export default function ClientesPage() {
       {/* Contador */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-sm text-gray-500">
-          <span className="font-semibold text-gray-800">{filtrados.length}</span> de{" "}
-          <span className="font-semibold text-gray-800">{clientes.length}</span> clientes
+          {busquedaActiva ? (
+            buscando ? (
+              <span className="text-gray-400">Buscando…</span>
+            ) : (
+              <>
+                <span className="font-semibold text-gray-800">{filtrados.length}</span>{" "}
+                {filtrados.length === 1 ? "resultado" : "resultados"}
+              </>
+            )
+          ) : (
+            <>
+              <span className="font-semibold text-gray-800">{filtrados.length}</span> de{" "}
+              <span className="font-semibold text-gray-800">{clientes.length}</span> clientes
+            </>
+          )}
         </p>
         <div className="flex items-center gap-3">
           <div className="hidden sm:flex gap-3 text-xs text-gray-400">
@@ -567,11 +613,17 @@ export default function ClientesPage() {
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm ring-1 ring-[#4FAEB2]/15">
         {cargando ? (
           <div className="py-16 text-center text-gray-400 text-sm animate-pulse">Cargando clientes…</div>
+        ) : busquedaActiva && buscando ? (
+          <div className="py-16 text-center text-gray-400 text-sm animate-pulse">Buscando…</div>
         ) : filtrados.length === 0 ? (
           <div className="py-16 text-center text-gray-400">
             <p className="text-4xl mb-3">👥</p>
             <p className="font-medium text-gray-600">
-              {clientes.length === 0 ? "No hay clientes registrados" : "Sin resultados para los filtros aplicados"}
+              {busquedaActiva
+                ? "Sin resultados para la búsqueda"
+                : clientes.length === 0
+                  ? "No hay clientes registrados"
+                  : "Sin resultados para los filtros aplicados"}
             </p>
             {clientes.length === 0 && (
               <Link href="/clientes/nuevo" className="mt-4 inline-block text-sm text-gray-500 underline hover:text-gray-800">

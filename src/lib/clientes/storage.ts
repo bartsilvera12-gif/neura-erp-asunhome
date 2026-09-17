@@ -203,6 +203,39 @@ export async function getClientes(opts?: { incluirEliminados?: boolean; incluirP
   }
 }
 
+/**
+ * Búsqueda server-side de clientes por nombre / cédula / RUC / teléfono. Pensada
+ * para escalar a miles de registros: el filtrado ocurre en la base (ilike) y solo
+ * devuelve un tope de filas ya mapeadas a `Cliente` (con plan activo), listas para
+ * la lista de clientes. Requiere término de ≥2 caracteres.
+ */
+export async function buscarClientes(q: string, limit = 50): Promise<Cliente[]> {
+  if (typeof window === "undefined") return [];
+  const term = q.trim();
+  if (term.length < 2) return [];
+  try {
+    const params = new URLSearchParams({ q: term, plan_activo: "1", limit: String(limit) });
+    const res = await fetchWithSupabaseSession(`/api/clientes?${params.toString()}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error("[clientes] buscarClientes API:", res.status, text);
+      return [];
+    }
+    const json = (await res.json()) as { success: boolean; data?: unknown };
+    if (!json.success || !Array.isArray(json.data)) return [];
+    return (json.data as (SupabaseRow & { plan_activo?: string })[]).map((row) => {
+      const c = rowToCliente(row);
+      if (row.plan_activo) c.plan_activo = row.plan_activo;
+      return c;
+    });
+  } catch (e) {
+    console.error("[clientes] buscarClientes:", e);
+    return [];
+  }
+}
+
 /** Obtiene un cliente por ID vía API tenant. Por defecto excluye eliminados. */
 export async function getCliente(id: string, opts?: { incluirEliminados?: boolean }): Promise<Cliente | null> {
   if (typeof window === "undefined") {

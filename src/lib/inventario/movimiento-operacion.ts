@@ -59,6 +59,29 @@ export function origenBadgeClass(origen: string): string {
 }
 
 /**
+ * Documento comercial asociado a un movimiento (columna "Factura / Comprobante").
+ * Deriva del `origen` + `referencia` que ya viajan al frontend, sin duplicar datos:
+ *   - Ventas → Nº VTA-… con `tipo: "venta"` (la pantalla lo enlaza al comprobante
+ *     A4 usando `venta_id`).
+ *   - Compras → Nº COMP-… con `tipo: "compra"` (se muestra como texto; no hay
+ *     pantalla de detalle de compra).
+ *   - Resto (guarda, ajuste, etc.) → `tipo: "otro"` con la referencia como texto.
+ * Las anulaciones de venta (ref `ANUL-VTA-…`) se muestran con su Nº VTA subyacente.
+ */
+export function comprobanteMovimiento(
+  origen: string,
+  referencia?: string | null
+): { numero: string | null; tipo: "venta" | "compra" | "otro" } {
+  const ref = (referencia ?? "").trim();
+  if (ref.startsWith("ANUL-VTA-")) return { numero: ref.slice(5), tipo: "venta" }; // "VTA-…"
+  if (ref.startsWith("VTA-")) return { numero: ref, tipo: "venta" };
+  if (ref.startsWith("COMP-")) return { numero: ref, tipo: "compra" };
+  if (origen === "venta") return { numero: ref || null, tipo: "venta" };
+  if (origen === "compra") return { numero: ref || null, tipo: "compra" };
+  return { numero: ref || null, tipo: "otro" };
+}
+
+/**
  * "Operación / Referencia" legible. Deriva de `origen` + `referencia` sin
  * duplicar datos: usa la referencia que ya existe. Para movimientos antiguos sin
  * referencia y sin origen reconocible devuelve "Sin referencia histórica".

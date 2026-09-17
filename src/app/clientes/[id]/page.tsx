@@ -78,10 +78,11 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 // ── Tipos de pestaña ──────────────────────────────────────────────────────────
 
-type TabId = "informacion" | "estado_cuenta" | "suscripciones" | "marketing" | "proyectos" | "actividad" | "notas";
+type TabId = "informacion" | "compras" | "estado_cuenta" | "suscripciones" | "marketing" | "proyectos" | "actividad" | "notas";
 
 const TABS: { id: TabId; label: string; showWhen?: (c: Cliente) => boolean }[] = [
   { id: "informacion",   label: "Información"      },
+  { id: "compras",       label: "Compras"         },
   { id: "estado_cuenta", label: "Estado de cuenta" },
   { id: "suscripciones", label: "Suscripciones"    },
   { id: "marketing",     label: "Marketing",        showWhen: (c) => c.tipo_servicio_cliente === "marketing" },
@@ -105,6 +106,26 @@ function formatFechaHora(iso: string) {
     return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   } catch { return ""; }
 }
+
+// ── Historial de compras ──────────────────────────────────────────────────────
+
+type CompraCliente = {
+  id: string;
+  numero_control: string;
+  fecha: string;
+  total: number;
+  tipo_venta: "CONTADO" | "CREDITO";
+  estado: "activa" | "anulada" | "parcialmente_devuelta" | "devuelta_total";
+  numero_factura: string | null;
+  productos: Array<{ nombre: string; cantidad: number }>;
+};
+
+const COMPRA_ESTADO_LABEL: Record<CompraCliente["estado"], { label: string; cls: string }> = {
+  activa:                 { label: "Activa",     cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+  parcialmente_devuelta:  { label: "Devol. parcial", cls: "bg-amber-50 text-amber-700 ring-amber-200" },
+  devuelta_total:         { label: "Devuelta",   cls: "bg-slate-100 text-slate-600 ring-slate-200" },
+  anulada:                { label: "Anulada",    cls: "bg-rose-50 text-rose-700 ring-rose-200" },
+};
 
 // ── Placeholder para pestañas futuras ─────────────────────────────────────────
 
@@ -167,6 +188,9 @@ export default function ClienteDetailPage() {
   const [cargandoDetalleCliente, setCargandoDetalleCliente] = useState(false);
   const [errorCarga, setErrorCarga] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("informacion");
+  const [compras, setCompras] = useState<CompraCliente[] | null>(null);
+  const [cargandoCompras, setCargandoCompras] = useState(false);
+  const [errorCompras, setErrorCompras] = useState<string | null>(null);
   const [esAdmin, setEsAdmin] = useState(false);
   const [confirmarEliminar, setConfirmarEliminar] = useState(false);
   const [deletionReason, setDeletionReason] = useState("");
@@ -503,7 +527,24 @@ export default function ClienteDetailPage() {
       getSuscripciones(id).then(setSuscripciones);
       getPlanes().then(setPlanes);
     }
-  }, [id, activeTab]);
+    if (activeTab === "compras" && compras === null && !cargandoCompras) {
+      setCargandoCompras(true);
+      setErrorCompras(null);
+      fetchWithSupabaseSession(`/api/clientes/${encodeURIComponent(id)}/compras`, { cache: "no-store" })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const json = (await res.json()) as { success: boolean; data?: { compras?: CompraCliente[] } };
+          if (!json.success) throw new Error("respuesta no válida");
+          setCompras(json.data?.compras ?? []);
+        })
+        .catch((e) => {
+          console.error("[cliente/compras]", e);
+          setErrorCompras("No se pudo cargar el historial de compras.");
+          setCompras([]);
+        })
+        .finally(() => setCargandoCompras(false));
+    }
+  }, [id, activeTab, compras, cargandoCompras]);
 
   useEffect(() => {
     if (form.condicion_pago === "MENSUAL") {
@@ -2048,6 +2089,91 @@ export default function ClienteDetailPage() {
                 </button>
               </div>
             </form>
+          )}
+
+          {/* ── COMPRAS (historial de ventas) ────────────────────────────── */}
+          {activeTab === "compras" && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <SectionTitle>Historial de compras</SectionTitle>
+                {compras && compras.length > 0 && (
+                  <span className="text-xs text-slate-400">
+                    {compras.length} {compras.length === 1 ? "operación" : "operaciones"}
+                  </span>
+                )}
+              </div>
+
+              {cargandoCompras ? (
+                <div className="py-14 text-center text-sm text-slate-400 animate-pulse">Cargando compras…</div>
+              ) : errorCompras ? (
+                <div className="py-14 text-center text-sm text-rose-500">{errorCompras}</div>
+              ) : !compras || compras.length === 0 ? (
+                <div className="py-16 text-center">
+                  <span className="text-4xl">🧾</span>
+                  <p className="mt-3 text-sm font-medium text-slate-500">Este cliente todavía no registra compras</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <th className="px-4 py-3">Fecha</th>
+                        <th className="px-4 py-3">Nº</th>
+                        <th className="px-4 py-3">Productos</th>
+                        <th className="px-4 py-3 text-right">Total</th>
+                        <th className="px-4 py-3">Estado</th>
+                        <th className="px-4 py-3 text-right">Detalle</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {compras.map((cp) => {
+                        const est = COMPRA_ESTADO_LABEL[cp.estado];
+                        const productosResumen =
+                          cp.productos.length === 0
+                            ? "—"
+                            : cp.productos
+                                .map((p) => (p.cantidad > 1 ? `${p.cantidad}× ${p.nombre}` : p.nombre))
+                                .join(", ");
+                        return (
+                          <tr key={cp.id} className="hover:bg-slate-50/60">
+                            <td className="px-4 py-3 whitespace-nowrap text-slate-700">{formatFecha(cp.fecha)}</td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <span className="font-semibold text-slate-800">{cp.numero_factura || cp.numero_control}</span>
+                              {cp.numero_factura && (
+                                <span className="block text-[11px] text-slate-400">{cp.numero_control}</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 max-w-[22rem]">
+                              <span className="line-clamp-2 text-slate-600" title={productosResumen}>
+                                {productosResumen}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right whitespace-nowrap font-semibold text-slate-800">
+                              Gs. {cp.total.toLocaleString("es-PY")}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${est.cls}`}>
+                                {est.label}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right whitespace-nowrap">
+                              <a
+                                href={`/api/ventas/${cp.id}/comprobante-a4?ver=1`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs font-medium text-[#0EA5E9] hover:text-[#0284C7]"
+                              >
+                                Ver detalle
+                              </a>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           )}
 
           {/* ── ESTADO DE CUENTA ─────────────────────────────────────────── */}

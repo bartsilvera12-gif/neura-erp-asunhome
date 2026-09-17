@@ -131,16 +131,44 @@ export async function GET(request: NextRequest) {
       // comodines) — se conserva solo texto/dígitos/espacios/.-.
       const safe = rawQ.replace(/[^\p{L}\p{N} .\-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 60);
       if (!safe) return NextResponse.json(successResponse([]));
-      const limit = Math.min(Math.max(Number(sp.get("limit")) || 25, 1), 50);
+      const limit = Math.min(Math.max(Number(sp.get("limit")) || 25, 1), 100);
       const pat = `%${safe}%`;
+      const orFilter = `nombre.ilike.${pat},nombre_contacto.ilike.${pat},empresa.ilike.${pat},ruc.ilike.${pat},documento.ilike.${pat},telefono.ilike.${pat}`;
+
+      // Con plan_activo=1 (lista de clientes): filas COMPLETAS + plan activo, para
+      // poblar todas las columnas. Sin él (selector de ventas): campos mínimos y
+      // rápido (typeahead), sin enriquecimientos.
+      if (planActivo) {
+        const { data, error } = await supabase
+          .from("clientes")
+          .select("*")
+          .eq("empresa_id", auth.empresa_id)
+          .is("deleted_at", null)
+          .or(orFilter)
+          .order("nombre", { ascending: true })
+          .limit(limit);
+        if (error) {
+          return NextResponse.json(errorResponse(error.message), { status: 400 });
+        }
+        const rows = (data ?? []) as Record<string, unknown>[];
+        if (rows.length > 0) {
+          const ids = rows.map((r) => r.id).filter((id): id is string => typeof id === "string");
+          try {
+            const planMap = await buildPlanActivoMap(supabase, auth.empresa_id, ids);
+            attachPlanesActivos(rows, planMap);
+          } catch (e) {
+            console.error("[api/clientes] search enrich plan activo:", e instanceof Error ? e.message : e);
+          }
+        }
+        return NextResponse.json(successResponse(rows));
+      }
+
       const { data, error } = await supabase
         .from("clientes")
         .select("id, empresa, nombre_contacto, nombre, ruc, documento, telefono, direccion, usa_nota_remision")
         .eq("empresa_id", auth.empresa_id)
         .is("deleted_at", null)
-        .or(
-          `nombre.ilike.${pat},nombre_contacto.ilike.${pat},empresa.ilike.${pat},ruc.ilike.${pat},documento.ilike.${pat},telefono.ilike.${pat}`
-        )
+        .or(orFilter)
         .order("nombre", { ascending: true })
         .limit(limit);
       if (error) {

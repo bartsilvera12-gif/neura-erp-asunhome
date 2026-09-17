@@ -28,6 +28,7 @@ import {
   origenLabel,
   origenBadgeClass,
   operacionLabel,
+  comprobanteMovimiento,
 } from "@/lib/inventario/movimiento-operacion";
 
 // Badges con paleta del sistema (turquesa + colores semanticos suaves)
@@ -285,6 +286,7 @@ export default function MovimientosPage() {
                 </th>
                 <th className="hidden md:table-cell px-3 py-3 font-semibold">Origen</th>
                 <th className="px-3 py-3 font-semibold">Operación</th>
+                <th className="px-3 py-3 font-semibold">Factura / Comprobante</th>
                 <th className="hidden lg:table-cell px-3 py-3 font-semibold">Usuario</th>
                 <th className="px-3 py-3 font-semibold">Fecha</th>
               </tr>
@@ -292,13 +294,13 @@ export default function MovimientosPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-400 text-sm">
+                  <td colSpan={10} className="py-12 text-center text-slate-400 text-sm">
                     Cargando...
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-16 text-center">
+                  <td colSpan={10} className="py-16 text-center">
                     <div className="inline-flex items-center justify-center h-14 w-14 rounded-2xl bg-[#4FAEB2]/8 border border-[#4FAEB2]/20 mb-3">
                       <Package className="h-6 w-6 text-[#4FAEB2]" />
                     </div>
@@ -381,6 +383,27 @@ export default function MovimientosPage() {
                             anulado
                           </span>
                         )}
+                      </td>
+                      {/* Factura / Comprobante: Ventas → Nº VTA con link al comprobante A4;
+                          Compras → COMP-… como texto (sin pantalla de detalle). */}
+                      <td className="px-3 py-3.5 text-xs">
+                        {(() => {
+                          const comp = comprobanteMovimiento(m.origen, m.referencia);
+                          if (!comp.numero) return <span className="text-slate-300">—</span>;
+                          if (comp.tipo === "venta" && m.venta_id) {
+                            return (
+                              <a
+                                href={`/api/ventas/${m.venta_id}/comprobante-a4?ver=1`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="font-mono font-semibold text-[#3F8E91] hover:text-[#4FAEB2] hover:underline"
+                              >
+                                {comp.numero}
+                              </a>
+                            );
+                          }
+                          return <span className="font-mono text-slate-600">{comp.numero}</span>;
+                        })()}
                       </td>
                       <td className="hidden lg:table-cell px-3 py-3.5 text-slate-600 text-xs">
                         {m.usuario_nombre ?? (
