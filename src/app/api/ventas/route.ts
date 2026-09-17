@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
+import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
+import { getChatPostgresPool, quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
+import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
 import type { Venta, LineaVenta, TipoIvaVenta, TipoPrecioVenta } from "@/lib/ventas/types";
@@ -110,19 +113,28 @@ export async function GET(request: NextRequest) {
 
     // Facturas autoimpresor: numero_completo (formato EEE-PPP-NNNNNNN, p.ej.
     // "001-001-0004966") reservado por venta al emitir la preimpresa. Cae como
-    // fallback cuando la venta no tiene factura ERP (SIFEN). Best-effort.
+    // fallback cuando la venta no tiene factura ERP (SIFEN). Se lee por pg pool
+    // directo (no PostgREST) para no depender del cache de esquema de PostgREST
+    // cuando la tabla se agrega en caliente. Best-effort.
     const numeroAutoByVentaMap = new Map<string, string>();
     const ventaIdsForAuto = ((ventasQ.data ?? []) as VentaRow[]).map((v) => v.id);
     if (ventaIdsForAuto.length > 0) {
-      const faQ = await ctx.supabase
-        .from("factura_autoimpresor")
-        .select("venta_id, numero_completo")
-        .eq("empresa_id", empresaId)
-        .in("venta_id", ventaIdsForAuto);
-      if (!faQ.error) {
-        for (const row of (faQ.data ?? []) as Array<{ venta_id: string; numero_completo?: string | null }>) {
-          if (row.numero_completo) numeroAutoByVentaMap.set(row.venta_id, row.numero_completo);
+      try {
+        const schema = assertAllowedChatDataSchema(await fetchDataSchemaForEmpresaId(empresaId));
+        const pool = getChatPostgresPool();
+        if (pool) {
+          const t = quoteSchemaTable(schema, "factura_autoimpresor");
+          const faRes = await pool.query<{ venta_id: string; numero_completo: string | null }>(
+            `SELECT venta_id::text, numero_completo FROM ${t}
+              WHERE empresa_id = $1::uuid AND venta_id = ANY($2::uuid[])`,
+            [empresaId, ventaIdsForAuto]
+          );
+          for (const row of faRes.rows) {
+            if (row.numero_completo) numeroAutoByVentaMap.set(row.venta_id, row.numero_completo);
+          }
         }
+      } catch (e) {
+        console.warn("[/api/ventas] factura_autoimpresor lookup skipped:", e instanceof Error ? e.message : e);
       }
     }
 
