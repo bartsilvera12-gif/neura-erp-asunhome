@@ -56,19 +56,34 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
     const url = new URL(request.url);
     const calibrar = url.searchParams.get("calibrar") === "1";
     const ver = url.searchParams.get("ver") === "1";
+    const diag = url.searchParams.get("diag") === "1";
 
     // 0) Reservar (o recuperar) el número de factura preimpresa desde la
     // config de autoimpresor. Idempotente por venta: si ya se emitió, devuelve
     // la misma. Best-effort: si la config no está lista o no está activa, se
     // deja pasar y la venta queda sin número (aparecerá "Sin factura" en el
     // listado hasta que se configure y se reimprima).
+    let emisionInfo: { ok: boolean; numero_completo?: string; motivo?: string; error?: string } = { ok: false };
     try {
       const schema = await fetchDataSchemaForEmpresaId(empresaId);
-      await emitirFacturaAutoimpresor(schema, empresaId, ventaId);
+      const f = await emitirFacturaAutoimpresor(schema, empresaId, ventaId);
+      emisionInfo = { ok: true, numero_completo: f.numero_completo };
     } catch (e) {
-      if (!(e instanceof EmisionBloqueadaError)) {
+      if (e instanceof EmisionBloqueadaError) {
+        emisionInfo = { ok: false, motivo: e.motivo, error: e.message };
+      } else {
+        emisionInfo = { ok: false, motivo: "excepcion", error: e instanceof Error ? e.message : String(e) };
         console.warn("[factura-preimpresa] emisión omitida:", e instanceof Error ? e.message : e);
       }
+    }
+
+    // Modo diagnóstico: devuelve el estado de la emisión en JSON en vez del PDF.
+    // Uso: agregar ?diag=1 a la URL de la factura preimpresa desde el navegador.
+    if (diag) {
+      return NextResponse.json(
+        { ventaId, ...emisionInfo },
+        { status: 200, headers: { "Cache-Control": "no-store" } }
+      );
     }
 
     // 1) Venta
