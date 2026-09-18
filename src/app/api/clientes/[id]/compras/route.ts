@@ -10,6 +10,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
+import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
+import { getChatPostgresPool, quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
+import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
 
 interface VentaRow {
   id: string;
@@ -124,6 +127,32 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
       /* columna origen_venta_id ausente en el schema del tenant: se ignora */
     }
 
+    // (3) Factura AUTOIMPRESOR: numero_completo (formato EEE-PPP-NNNNNNN, p.ej.
+    // "001-001-0004966") = el número REAL del comprobante ya emitido al imprimir la
+    // preimpresa. Es la fuente principal para tenants que facturan por autoimpresor
+    // (no SIFEN). Se lee por pg pool directo (no PostgREST) para no depender del
+    // cache de esquema de PostgREST, igual que /api/ventas. Best-effort, solo lectura.
+    const numeroAutoByVentaId = new Map<string, string>();
+    if (ventaIds.length > 0) {
+      try {
+        const schema = assertAllowedChatDataSchema(await fetchDataSchemaForEmpresaId(empresaId));
+        const pool = getChatPostgresPool();
+        if (pool) {
+          const t = quoteSchemaTable(schema, "factura_autoimpresor");
+          const faRes = await pool.query<{ venta_id: string; numero_completo: string | null }>(
+            `SELECT venta_id::text, numero_completo FROM ${t}
+              WHERE empresa_id = $1::uuid AND venta_id = ANY($2::uuid[])`,
+            [empresaId, ventaIds]
+          );
+          for (const row of faRes.rows) {
+            if (row.numero_completo) numeroAutoByVentaId.set(row.venta_id, row.numero_completo);
+          }
+        }
+      } catch (e) {
+        console.warn("[/api/clientes/[id]/compras] factura_autoimpresor lookup skipped:", e instanceof Error ? e.message : e);
+      }
+    }
+
     const compras = ventasRows.map((v) => {
       const estado = ((): "activa" | "anulada" | "parcialmente_devuelta" | "devuelta_total" => {
         if (v.estado === "anulada") return "anulada";
@@ -138,7 +167,9 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
         total: num(v.total),
         tipo_venta: v.tipo_venta === "CREDITO" ? "CREDITO" : "CONTADO",
         estado,
-        numero_factura: numeroFacturaByVentaId.get(v.id) ?? null,
+        // Nº real del comprobante: factura ERP (SIFEN) si existe; si no, el número
+        // completo de la factura autoimpresor ya emitida; si ninguna, null → "Sin factura".
+        numero_factura: numeroFacturaByVentaId.get(v.id) ?? numeroAutoByVentaId.get(v.id) ?? null,
         productos: itemsByVenta.get(v.id) ?? [],
       };
     });
