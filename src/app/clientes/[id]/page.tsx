@@ -2118,7 +2118,8 @@ export default function ClienteDetailPage() {
                     <thead>
                       <tr className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                         <th className="px-4 py-3">Fecha</th>
-                        <th className="px-4 py-3">Nº</th>
+                        <th className="px-4 py-3">Factura</th>
+                        <th className="px-4 py-3">Nº venta</th>
                         <th className="px-4 py-3">Productos</th>
                         <th className="px-4 py-3 text-right">Total</th>
                         <th className="px-4 py-3">Estado</th>
@@ -2137,11 +2138,18 @@ export default function ClienteDetailPage() {
                         return (
                           <tr key={cp.id} className="hover:bg-slate-50/60">
                             <td className="px-4 py-3 whitespace-nowrap text-slate-700">{formatFecha(cp.fecha)}</td>
+                            {/* Factura: número REAL del comprobante ya emitido; "Sin factura" si la
+                                venta no tiene factura vinculada (se registró como ticket). */}
                             <td className="px-4 py-3 whitespace-nowrap">
-                              <span className="font-semibold text-slate-800">{cp.numero_factura || cp.numero_control}</span>
-                              {cp.numero_factura && (
-                                <span className="block text-[11px] text-slate-400">{cp.numero_control}</span>
+                              {cp.numero_factura ? (
+                                <span className="font-semibold text-slate-800">{cp.numero_factura}</span>
+                              ) : (
+                                <span className="italic text-slate-400">Sin factura</span>
                               )}
+                            </td>
+                            {/* Nº venta interno (VTA-…), como referencia de trazabilidad. */}
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <span className="font-mono text-xs text-slate-500">{cp.numero_control}</span>
                             </td>
                             <td className="px-4 py-3 max-w-[22rem]">
                               <span className="line-clamp-2 text-slate-600" title={productosResumen}>

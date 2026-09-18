@@ -69,11 +69,20 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
       itemsByVenta.set(it.venta_id, list);
     }
 
-    // Puente venta→factura: Nº de factura ERP cuando existe. Best-effort.
+    // Nº de factura REAL por venta, resuelto por DOS vías (best-effort, SOLO
+    // lectura: no genera ni reserva ninguna factura):
+    //  (1) forward: ventas.factura_id → facturas.id
+    //  (2) reverse: facturas.origen_venta_id → ventas.id  — más confiable, porque
+    //      se setea atómicamente al emitir la factura, mientras que ventas.factura_id
+    //      es un UPDATE posterior que puede faltar en ventas históricas (por eso
+    //      algunas compras mostraban solo el VTA- interno).
+    // Se prefiere cualquier numero_factura no nulo.
+    const numeroFacturaByVentaId = new Map<string, string>();
+
+    // (1) forward
     const facturaIds = [
       ...new Set(ventasRows.map((v) => v.factura_id).filter((x): x is string => !!x)),
     ];
-    const numeroFacturaById = new Map<string, string>();
     if (facturaIds.length > 0) {
       const facQ = await ctx.supabase
         .from("facturas")
@@ -81,10 +90,38 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
         .eq("empresa_id", empresaId)
         .in("id", facturaIds);
       if (!facQ.error) {
+        const numById = new Map<string, string>();
         for (const row of (facQ.data ?? []) as Array<{ id: string; numero_factura?: string | null }>) {
-          if (row.numero_factura) numeroFacturaById.set(row.id, row.numero_factura);
+          if (row.numero_factura) numById.set(row.id, row.numero_factura);
+        }
+        for (const v of ventasRows) {
+          if (v.factura_id) {
+            const n = numById.get(v.factura_id);
+            if (n) numeroFacturaByVentaId.set(v.id, n);
+          }
         }
       }
+    }
+
+    // (2) reverse — cubre ventas cuyo factura_id no quedó backfilleado. La columna
+    // origen_venta_id es aditiva del puente venta→factura; si el schema del tenant
+    // no la tiene, PostgREST devuelve error y simplemente se ignora esta vía.
+    try {
+      const revQ = await ctx.supabase
+        .from("facturas")
+        .select("numero_factura, origen_venta_id")
+        .eq("empresa_id", empresaId)
+        .in("origen_venta_id", ventaIds);
+      if (!revQ.error) {
+        for (const row of (revQ.data ?? []) as Array<{ numero_factura?: string | null; origen_venta_id?: string | null }>) {
+          const vid = row.origen_venta_id;
+          if (vid && row.numero_factura && !numeroFacturaByVentaId.has(vid)) {
+            numeroFacturaByVentaId.set(vid, row.numero_factura);
+          }
+        }
+      }
+    } catch {
+      /* columna origen_venta_id ausente en el schema del tenant: se ignora */
     }
 
     const compras = ventasRows.map((v) => {
@@ -101,7 +138,7 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
         total: num(v.total),
         tipo_venta: v.tipo_venta === "CREDITO" ? "CREDITO" : "CONTADO",
         estado,
-        numero_factura: v.factura_id ? numeroFacturaById.get(v.factura_id) ?? null : null,
+        numero_factura: numeroFacturaByVentaId.get(v.id) ?? null,
         productos: itemsByVenta.get(v.id) ?? [],
       };
     });
