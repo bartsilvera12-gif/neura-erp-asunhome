@@ -24,6 +24,10 @@ export default function ReservaDetallePage() {
   const [pagoOpen, setPagoOpen] = useState(false);
   const [facturando, setFacturando] = useState(false);
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
+  // Flujo "cobrar saldo y facturar todo": monto sugerido para el modal de pago y
+  // bandera para, tras registrar el cobro, facturar todo lo pendiente sin re-preguntar.
+  const [pagoMontoSugerido, setPagoMontoSugerido] = useState<number | undefined>(undefined);
+  const [facturarTrasPago, setFacturarTrasPago] = useState(false);
 
   const cargar = useCallback(async () => {
     setCargando(true); setErr(null);
@@ -52,7 +56,7 @@ export default function ReservaDetallePage() {
   }
 
   async function cancelar() {
-    if (!window.confirm("¿Cancelar la reserva? La mercadería no entregada vuelve al stock.")) return;
+    if (!window.confirm("¿Estás seguro de CANCELAR esta reserva?\n\nEsta acción no se puede deshacer: los productos no entregados vuelven al stock y se pierde la guarda.\n\nSi solo querías facturar, cerrá este aviso y usá \"Facturar todo lo pendiente\".")) return;
     const r = await fetchWithSupabaseSession(`/api/reservas/${id}/cancelar`, { method: "POST" });
     const j = await r.json();
     if (!r.ok || j?.success === false) { alert(j?.error ?? "No se pudo cancelar."); return; }
@@ -60,13 +64,14 @@ export default function ReservaDetallePage() {
   }
 
   // itemIds=null → factura TODOS los pendientes; con array → solo esos (parcial).
-  async function facturar(itemIds: string[] | null) {
+  // skipConfirm: cuando ya se confirmó en el flujo "cobrar y facturar".
+  async function facturar(itemIds: string[] | null, opts?: { skipConfirm?: boolean }) {
     if (facturando) return; // guard anti doble-click
     const cuantos = itemIds ? itemIds.length : items.filter((it) => !it.venta_id).length;
     const msg = itemIds
       ? `¿Facturar ${cuantos} producto(s) seleccionado(s) al precio pactado? No se vuelve a descontar stock.`
       : `¿Facturar todos los productos pendientes al precio pactado? No se vuelve a descontar stock.`;
-    if (!window.confirm(msg)) return;
+    if (!opts?.skipConfirm && !window.confirm(msg)) return;
     setFacturando(true);
     try {
       const r = await fetchWithSupabaseSession(`/api/reservas/${id}/facturar`, {
@@ -103,6 +108,21 @@ export default function ReservaDetallePage() {
   const selCubierto = totalSeleccionado <= disponible + 0.009;
   const totalPendiente = itemsPendientes.reduce((s, it) => s + it.total, 0);
   const todoCubierto = totalPendiente <= disponible + 0.009;
+  // Faltante para poder facturar TODO lo pendiente (toma en cuenta la seña/anticipos
+  // ya registrados vía `disponible`). Nunca supera el saldo de la reserva.
+  const faltantePorCubrir = Math.max(0, Math.round(totalPendiente - disponible));
+
+  // Flujo pedido: "Facturar todo lo pendiente" aunque haya saldo. Si el pago ya cubre,
+  // factura directo; si falta, abre el cobro del saldo restante y, al confirmarse el
+  // pago, factura todo automáticamente. Nunca obliga a cancelar la reserva.
+  const facturarTodoFlow = () => {
+    if (facturando || itemsPendientes.length === 0) return;
+    if (todoCubierto) { void facturar(null); return; }
+    if (!window.confirm(`Para facturar todo lo pendiente falta cobrar ${fmtGs(faltantePorCubrir)}.\n\n¿Registrar ese cobro ahora y facturar todos los productos pendientes?`)) return;
+    setPagoMontoSugerido(faltantePorCubrir);
+    setFacturarTrasPago(true);
+    setPagoOpen(true);
+  };
 
   return (
     <div className="space-y-6">
@@ -128,12 +148,12 @@ export default function ReservaDetallePage() {
               )}
               {itemsPendientes.length > 0 && (
                 <button
-                  onClick={() => facturar(null)}
-                  disabled={!todoCubierto || facturando}
-                  title={todoCubierto ? "Factura todos los productos pendientes al precio pactado." : "Cobrá el saldo para facturar todo lo pendiente."}
+                  onClick={facturarTodoFlow}
+                  disabled={facturando}
+                  title={todoCubierto ? "Factura todos los productos pendientes al precio pactado." : "Cobra el saldo restante y factura todo lo pendiente en un solo paso."}
                   className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {facturando ? "Facturando…" : "Facturar todo lo pendiente"}
+                  {facturando ? "Facturando…" : todoCubierto ? "Facturar todo lo pendiente" : "Cobrar saldo y facturar todo"}
                 </button>
               )}
               <button onClick={cancelar} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100">Cancelar</button>
@@ -145,7 +165,7 @@ export default function ReservaDetallePage() {
               <p className="text-[11px] text-slate-500">Seleccionados: {selPend.length} · {fmtGs(totalSeleccionado)} (cubierto por lo pagado).</p>
             )}
             {selPend.length === 0 && !todoCubierto && (
-              <p className="text-[11px] text-amber-600">Podés facturar por partes: seleccioná los productos que se lleva el cliente, o cobrá el saldo ({fmtGs(header.saldo)}) para facturar todo.</p>
+              <p className="text-[11px] text-amber-600">Hay un saldo de {fmtGs(header.saldo)}. Con “Cobrar saldo y facturar todo” registrás el cobro y facturás todo lo pendiente en un paso (no hace falta cancelar). O facturá por partes seleccionando productos.</p>
             )}
           </div>
         )}
@@ -266,7 +286,23 @@ export default function ReservaDetallePage() {
       {header.observaciones && <p className="text-sm text-slate-500">Observaciones: {header.observaciones}</p>}
       <p className="text-xs text-slate-400">Podés facturar los productos por partes: seleccioná los que se lleva el cliente y facturálos: cada uno se factura con el precio pactado, siempre que el pago acumulado lo cubra. Los demás quedan en guarda. NO se vuelve a descontar stock (la mercadería ya salió al crear la guarda) y los anticipos ya entraron a caja.</p>
 
-      {pagoOpen && <PagoModal reservaId={id} saldo={header.saldo} onClose={() => setPagoOpen(false)} onDone={() => { setPagoOpen(false); void cargar(); }} />}
+      {pagoOpen && (
+        <PagoModal
+          reservaId={id}
+          saldo={header.saldo}
+          montoSugerido={pagoMontoSugerido}
+          onClose={() => { setPagoOpen(false); setFacturarTrasPago(false); setPagoMontoSugerido(undefined); }}
+          onDone={async () => {
+            setPagoOpen(false);
+            const encadenar = facturarTrasPago;
+            setFacturarTrasPago(false);
+            setPagoMontoSugerido(undefined);
+            await cargar();
+            // Ya se registró el cobro del saldo → facturar todo lo pendiente sin re-preguntar.
+            if (encadenar) await facturar(null, { skipConfirm: true });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -276,8 +312,10 @@ function Card({ label, value, tone }: { label: string; value: string; tone?: "em
   return <div className={`rounded-xl border p-4 ${c}`}><p className="text-[10px] font-bold uppercase tracking-wider opacity-80">{label}</p><p className="mt-1 text-lg font-bold tabular-nums">{value}</p></div>;
 }
 
-function PagoModal({ reservaId, saldo, onClose, onDone }: { reservaId: string; saldo: number; onClose: () => void; onDone: () => void }) {
-  const [monto, setMonto] = useState(Math.round(saldo / 2)); // sugerencia: 50%
+function PagoModal({ reservaId, saldo, montoSugerido, onClose, onDone }: { reservaId: string; saldo: number; montoSugerido?: number; onClose: () => void; onDone: () => void }) {
+  // Si viene un monto sugerido (flujo "cobrar saldo y facturar todo"), se precarga
+  // el saldo restante; si no, la sugerencia por defecto es el 50%.
+  const [monto, setMonto] = useState(montoSugerido && montoSugerido > 0 ? Math.min(montoSugerido, saldo) : Math.round(saldo / 2));
   const [metodo, setMetodo] = useState("efectivo");
   const [referencia, setReferencia] = useState("");
   const [loading, setLoading] = useState(false);
@@ -310,7 +348,11 @@ function PagoModal({ reservaId, saldo, onClose, onDone }: { reservaId: string; s
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Monto</span>
             <MontoInput value={monto} onChange={setMonto} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-right text-sm outline-none focus:border-[#4FAEB2]" />
-            <span className="mt-1 block text-[11px] text-slate-500">Sugerencia: 50% = {fmtGs(saldo / 2)}. Podés poner el monto que sea.</span>
+            <span className="mt-1 block text-[11px] text-slate-500">
+              {montoSugerido && montoSugerido > 0
+                ? `Saldo restante para facturar todo: ${fmtGs(Math.min(montoSugerido, saldo))}. Podés ajustarlo.`
+                : `Sugerencia: 50% = ${fmtGs(saldo / 2)}. Podés poner el monto que sea.`}
+            </span>
           </label>
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Método</span>
