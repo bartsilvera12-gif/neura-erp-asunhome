@@ -102,6 +102,19 @@ export default function VentasPage() {
   const [devolverVentaId, setDevolverVentaId] = useState<string | null>(null);
   // El usuario Armando (armando@admin.com) no edita ventas: se le oculta el botón "Editar".
   const [ocultarEditar, setOcultarEditar] = useState(false);
+  // Aviso (descartable) para mantener la numeración del sistema en sincronía con el
+  // talonario físico: si un comprobante sale mal hay que anular la venta ANTES de
+  // reimprimir. Se recuerda la elección en localStorage.
+  const [avisoNumeracion, setAvisoNumeracion] = useState(false);
+
+  useEffect(() => {
+    try { setAvisoNumeracion(localStorage.getItem("aviso_numeracion_preimpresa") !== "off"); }
+    catch { setAvisoNumeracion(true); }
+  }, []);
+  const cerrarAvisoNumeracion = () => {
+    setAvisoNumeracion(false);
+    try { localStorage.setItem("aviso_numeracion_preimpresa", "off"); } catch { /* modo privado: igual se oculta esta sesión */ }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -210,6 +223,28 @@ export default function VentasPage() {
             + Nueva venta
           </Link>
         </div>
+
+        {/* Aviso: mantener la numeración del sistema igual al talonario físico. */}
+        {avisoNumeracion && (
+          <div className="mb-5 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+            <span className="text-lg leading-none">💡</span>
+            <div className="flex-1 text-xs text-amber-800">
+              <p className="font-semibold">Para que el N.º de factura coincida con el talonario físico:</p>
+              <p className="mt-0.5">
+                Si un comprobante <b>salió mal, anulá la venta acá</b> antes de reimprimir, y facturá <b>de a una por vez</b> en orden. El número anulado no se reutiliza.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={cerrarAvisoNumeracion}
+              className="shrink-0 rounded p-1 text-amber-500 transition-colors hover:bg-amber-100"
+              title="Entendido, no mostrar más"
+              aria-label="Cerrar aviso"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Filtros */}
         <div className="flex flex-wrap items-center gap-3 mb-5 pb-5 border-b border-gray-100">
