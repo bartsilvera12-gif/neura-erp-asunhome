@@ -98,6 +98,7 @@ export default function VentasPage() {
   const [anularTarget, setAnularTarget] = useState<Venta | null>(null);
   const [editarTarget, setEditarTarget] = useState<Venta | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [reimprimiendoId, setReimprimiendoId] = useState<string | null>(null);
   const [devolucionesOn, setDevolucionesOn] = useState(false);
   const [devolverVentaId, setDevolverVentaId] = useState<string | null>(null);
   // El usuario Armando (armando@admin.com) no edita ventas: se le oculta el botón "Editar".
@@ -153,6 +154,29 @@ export default function VentasPage() {
       cancelled = true;
     };
   }, [reloadKey]);
+
+  // "La factura salió mal → reimprimir en hoja nueva": anula el número actual de
+  // la venta y toma el siguiente del talonario, para reimprimir en una hoja física
+  // nueva sin desfasar el correlativo. Solo numeración (no toca stock/caja/ítems).
+  async function reimprimirNuevaHoja(v: Venta) {
+    if (reimprimiendoId) return;
+    if (!window.confirm(
+      `¿La factura ${v.numero_factura ?? ""} salió mal?\n\n` +
+      `Se ANULA ese número (la hoja física se archiva anulada) y la venta toma el SIGUIENTE ` +
+      `número del talonario para reimprimir en una hoja nueva.\n\n¿Continuar?`
+    )) return;
+    setReimprimiendoId(v.id);
+    try {
+      const res = await fetch(`/api/ventas/${v.id}/factura-preimpresa/rehacer`, { method: "POST", credentials: "include" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j?.success === false) { alert(j?.error ?? "No se pudo reimprimir en hoja nueva."); return; }
+      // Abre la factura para imprimir en la hoja nueva (con el número ya avanzado).
+      try { window.open(`/api/ventas/${v.id}/factura-preimpresa`, "_blank", "noopener"); } catch {}
+      setReloadKey((k) => k + 1);
+    } finally {
+      setReimprimiendoId(null);
+    }
+  }
 
   const filtradas = todas.filter((v) => {
     // Anuladas ocultas por defecto (toggle "Ver anuladas" las muestra).
@@ -443,6 +467,18 @@ export default function VentasPage() {
                           >
                             Factura preimpresa
                           </a>
+                          {/* Reimprimir en hoja nueva: solo si ya tiene número (se imprimió) y no está anulada. */}
+                          {v.numero_factura && !isAnulada && (
+                            <button
+                              type="button"
+                              onClick={() => reimprimirNuevaHoja(v)}
+                              disabled={reimprimiendoId === v.id}
+                              title="La factura salió mal: anula este número (la hoja física queda anulada) y toma el siguiente del talonario para reimprimir en una hoja nueva."
+                              className="inline-flex items-center justify-center rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {reimprimiendoId === v.id ? "Reimprimiendo…" : "Reimprimir en hoja nueva"}
+                            </button>
+                          )}
                           {/* Puente venta→factura: si la venta tiene factura ERP, link al
                               detalle /facturas/[id] (panel SIFEN: firma/envío/KUDE). */}
                           {v.factura_id && (

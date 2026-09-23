@@ -259,3 +259,85 @@ export async function emitirFacturaAutoimpresor(
     client.release();
   }
 }
+
+/**
+ * "La factura salió mal → reimprimir en hoja nueva": salta (anula) el número
+ * actual de la venta y le asigna el SIGUIENTE número del talonario, para que el
+ * sistema quede alineado con la hoja física nueva. El número anterior queda como
+ * salto en el correlativo (la hoja física se archiva anulada, en papel).
+ *
+ * A diferencia de `emitirFacturaAutoimpresor`, NO es idempotente: cada llamada
+ * avanza el número (una por cada hoja física desperdiciada). Requiere que la venta
+ * ya tenga una factura emitida (si no, no hay nada que reimprimir).
+ */
+export async function reimprimirFacturaEnNuevaHoja(
+  schemaRaw: string,
+  empresaId: string,
+  ventaId: string
+): Promise<FacturaAutoimpresor> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const pool = getChatPostgresPool();
+  if (!pool) throw new Error("Pool no disponible.");
+
+  const tFactura = quoteSchemaTable(schema, "factura_autoimpresor");
+  const tConfig = quoteSchemaTable(schema, "empresa_autoimpresor_config");
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Debe existir una factura previa (ya se imprimió al menos una vez).
+    const prevQ = await client.query(
+      `SELECT id FROM ${tFactura} WHERE empresa_id = $1::uuid AND venta_id = $2::uuid
+        ORDER BY numero_secuencia DESC LIMIT 1 FOR UPDATE`,
+      [empresaId, ventaId]
+    );
+    if (!prevQ.rows[0]) {
+      throw new EmisionBloqueadaError("config_incompleta", "La venta todavía no tiene una factura emitida para reimprimir.");
+    }
+    const facturaId = String((prevQ.rows[0] as Record<string, unknown>).id);
+
+    // Config con lock (mismo criterio que la emisión normal).
+    const cfgQ = await client.query(
+      `SELECT activo, establecimiento_codigo, punto_expedicion_codigo,
+              numero_inicial, numero_final, numero_actual
+         FROM ${tConfig} WHERE empresa_id = $1::uuid FOR UPDATE`,
+      [empresaId]
+    );
+    const cfg = cfgQ.rows[0] as Record<string, unknown> | undefined;
+    if (!cfg) throw new EmisionBloqueadaError("config_incompleta", "No hay configuración de autoimpresor.");
+    if (cfg.activo !== true) throw new EmisionBloqueadaError("config_inactiva", "El autoimpresor no está activo.");
+    const est = cfg.establecimiento_codigo ? String(cfg.establecimiento_codigo) : "";
+    const punto = cfg.punto_expedicion_codigo ? String(cfg.punto_expedicion_codigo) : "";
+    const inicial = cfg.numero_inicial == null ? null : num(cfg.numero_inicial);
+    const final = cfg.numero_final == null ? null : num(cfg.numero_final);
+    const actual = cfg.numero_actual == null ? null : num(cfg.numero_actual);
+    if (!est || !punto || inicial == null || final == null || actual == null) {
+      throw new EmisionBloqueadaError("config_incompleta", "Faltan datos del timbrado (establecimiento, punto, rango).");
+    }
+    if (actual < inicial || actual > final) {
+      throw new EmisionBloqueadaError("timbrado_agotado", "El timbrado se agotó o el número actual está fuera de rango.");
+    }
+
+    const seq = actual;
+    const numeroCompleto = formatNumeroFiscal(est, punto, seq);
+
+    const updQ = await client.query(
+      `UPDATE ${tFactura} SET numero_secuencia = $2::integer, numero_completo = $3, emitida_at = now()
+        WHERE id = $1::uuid RETURNING ${FA_COLS}`,
+      [facturaId, seq, numeroCompleto]
+    );
+    await client.query(
+      `UPDATE ${tConfig} SET numero_actual = $2::integer, updated_at = now() WHERE empresa_id = $1::uuid`,
+      [empresaId, seq + 1]
+    );
+
+    await client.query("COMMIT");
+    return mapRow(updQ.rows[0] as Record<string, unknown>);
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
