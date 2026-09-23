@@ -1031,10 +1031,12 @@ export default function NuevaVentaPage() {
       // SOLO si la venta la genera (cliente con usa_nota_remision o toggle activo).
       const v = resultado.venta;
       const generaNota = v.genera_nota_remision === true || !!v.nota_remision_numero;
-      // Al finalizar la venta se abre automáticamente la FACTURA PREIMPRESA lista
-      // para imprimir sobre la hoja física. El comprobante A4 y el ticket siguen
-      // accesibles desde el listado de ventas (botones por fila).
-      const facturaUrl = `/api/ventas/${v.id}/factura-preimpresa`;
+      // NO se abre automáticamente la FACTURA PREIMPRESA al finalizar: abrirla
+      // RESERVA el número correlativo, y la cliente registra la venta antes de
+      // confirmar la forma de pago/precio. El número debe tomarse recién al
+      // imprimir de verdad → se hace desde el botón "Factura preimpresa" del
+      // listado, cuando ya está lista para imprimir. Así el correlativo del
+      // sistema coincide con el orden del talonario físico.
       const remisionUrl = `/api/ventas/${v.id}/ticket?tipo=remision&auto=1`;
 
       // Si esta venta se origino desde un presupuesto, marcar el presupuesto
@@ -1048,9 +1050,8 @@ export default function NuevaVentaPage() {
           });
         } catch { /* best-effort: si falla, se puede marcar a mano */ }
       }
-      // Apertura automática de la factura preimpresa para imprimir (popup; el
-      // navegador puede bloquearlo — si pasa, se reimprime desde el listado).
-      try { window.open(facturaUrl, "_blank", "noopener"); } catch {}
+      // Solo se abre la nota de remisión (documento NO fiscal, no reserva número).
+      // La factura preimpresa se imprime desde el listado cuando corresponda.
       if (generaNota) { try { window.open(remisionUrl, "_blank", "noopener"); } catch {} }
       // Redirige directo al listado de ventas en lugar de mostrar el modal
       // post-venta. El cajero queda libre para registrar otra venta de
