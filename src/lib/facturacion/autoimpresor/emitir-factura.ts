@@ -341,3 +341,88 @@ export async function reimprimirFacturaEnNuevaHoja(
     client.release();
   }
 }
+
+/**
+ * Edita manualmente el número de factura preimpresa de una venta (para que Norma
+ * mantenga el correlativo). Valida que el número esté dentro del rango del timbrado
+ * y que NO esté usado por otra factura (evita duplicados). Si el nuevo número queda
+ * por encima del contador, adelanta `numero_actual` para no colisionar en la próxima
+ * emisión. Solo numeración: no toca stock/caja/ítems.
+ */
+export async function setNumeroFacturaAutoimpresor(
+  schemaRaw: string,
+  empresaId: string,
+  ventaId: string,
+  nuevoSeq: number
+): Promise<FacturaAutoimpresor> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const pool = getChatPostgresPool();
+  if (!pool) throw new Error("Pool no disponible.");
+
+  const tFactura = quoteSchemaTable(schema, "factura_autoimpresor");
+  const tConfig = quoteSchemaTable(schema, "empresa_autoimpresor_config");
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const prevQ = await client.query(
+      `SELECT id, establecimiento_codigo AS est, punto_expedicion_codigo AS punto
+         FROM ${tFactura} WHERE empresa_id = $1::uuid AND venta_id = $2::uuid
+        ORDER BY numero_secuencia DESC LIMIT 1 FOR UPDATE`,
+      [empresaId, ventaId]
+    );
+    if (!prevQ.rows[0]) {
+      throw new Error("La venta no tiene una factura emitida para editarle el número.");
+    }
+    const row = prevQ.rows[0] as Record<string, unknown>;
+    const facturaId = String(row.id);
+    const est = String(row.est ?? "");
+    const punto = String(row.punto ?? "");
+
+    // Rango del timbrado.
+    const cfgQ = await client.query(
+      `SELECT numero_inicial, numero_final, numero_actual FROM ${tConfig} WHERE empresa_id = $1::uuid FOR UPDATE`,
+      [empresaId]
+    );
+    const cfg = cfgQ.rows[0] as Record<string, unknown> | undefined;
+    if (cfg) {
+      const ni = num(cfg.numero_inicial);
+      const nf = num(cfg.numero_final);
+      if (nuevoSeq < ni || nuevoSeq > nf) {
+        throw new Error(`El número debe estar entre ${ni} y ${nf} (rango del timbrado).`);
+      }
+    }
+
+    // Que no lo tenga otra factura.
+    const dupQ = await client.query(
+      `SELECT 1 FROM ${tFactura} WHERE empresa_id = $1::uuid AND numero_secuencia = $2::integer AND id <> $3::uuid LIMIT 1`,
+      [empresaId, nuevoSeq, facturaId]
+    );
+    if (dupQ.rows[0]) {
+      throw new Error(`El número ${formatNumeroFiscal(est, punto, nuevoSeq)} ya está usado por otra factura.`);
+    }
+
+    const numeroCompleto = formatNumeroFiscal(est, punto, nuevoSeq);
+    const updQ = await client.query(
+      `UPDATE ${tFactura} SET numero_secuencia = $2::integer, numero_completo = $3 WHERE id = $1::uuid RETURNING ${FA_COLS}`,
+      [facturaId, nuevoSeq, numeroCompleto]
+    );
+
+    // Adelantar el contador si hace falta, para no colisionar en la próxima emisión.
+    if (cfg && num(cfg.numero_actual) <= nuevoSeq) {
+      await client.query(
+        `UPDATE ${tConfig} SET numero_actual = $2::integer, updated_at = now() WHERE empresa_id = $1::uuid`,
+        [empresaId, nuevoSeq + 1]
+      );
+    }
+
+    await client.query("COMMIT");
+    return mapRow(updQ.rows[0] as Record<string, unknown>);
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}

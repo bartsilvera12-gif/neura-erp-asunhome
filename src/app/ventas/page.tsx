@@ -702,6 +702,19 @@ function EditarVentaModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // N.º de factura preimpresa (editable para mantener el correlativo). Solo se
+  // muestra si la venta ya tiene número. Se edita la parte numérica (secuencia).
+  const numeroFacturaActual = venta.numero_factura ?? "";
+  const numeroPrefijo = numeroFacturaActual.includes("-")
+    ? numeroFacturaActual.split("-").slice(0, -1).join("-") + "-"
+    : "";
+  const seqActual = (() => {
+    const last = numeroFacturaActual.split("-").pop() ?? "";
+    const n = parseInt(last.replace(/\D/g, ""), 10);
+    return Number.isFinite(n) && n > 0 ? String(n) : "";
+  })();
+  const [numeroSeq, setNumeroSeq] = useState<string>(seqActual);
+
   useEffect(() => {
     let vivo = true;
     (async () => {
@@ -724,6 +737,18 @@ function EditarVentaModal({
     setLoading(true);
     setError(null);
     try {
+      // 1) N.º de factura (si cambió y la venta tiene número). Se hace primero
+      //    porque valida rango/duplicado; si falla, no se toca el resto.
+      if (numeroFacturaActual && numeroSeq && numeroSeq !== seqActual) {
+        const rN = await fetch(`/api/ventas/${venta.id}/factura-preimpresa/numero`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ numero_secuencia: Number(numeroSeq) }),
+        });
+        const jN = await rN.json().catch(() => ({}));
+        if (!rN.ok || jN?.success === false) throw new Error(jN?.error ?? "No se pudo editar el número de factura.");
+      }
+      // 2) Resto de campos seguros (cliente / observaciones / vendedor).
       const res = await fetch(`/api/ventas/${venta.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -756,7 +781,7 @@ function EditarVentaModal({
         <div className="border-b border-slate-100 bg-gradient-to-r from-[#4FAEB2]/5 to-transparent px-5 py-4">
           <h3 className="text-base font-bold text-slate-800">Editar venta {venta.numero_control}</h3>
           <p className="mt-1 text-xs text-slate-500">
-            Cambia el cliente, el vendedor y las observaciones. No modifica productos, cantidades ni montos.
+            Cambia el cliente, el vendedor, las observaciones y el N.º de factura. No modifica productos, cantidades ni montos.
           </p>
         </div>
         <div className="p-5 space-y-4">
@@ -786,6 +811,24 @@ function EditarVentaModal({
                 />
               </div>
               <span className="mt-1 block text-[11px] text-slate-500">Cambia a quién se le acredita la comisión de esta venta.</span>
+            </label>
+          )}
+          {numeroFacturaActual && (
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">N.º de factura</span>
+              <div className="mt-1 flex items-center gap-2">
+                <span className="font-mono text-sm text-slate-500">{numeroPrefijo}</span>
+                <input
+                  value={numeroSeq}
+                  onChange={(e) => setNumeroSeq(e.target.value.replace(/\D/g, "").slice(0, 7))}
+                  inputMode="numeric"
+                  className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20 outline-none"
+                  disabled={loading}
+                />
+              </div>
+              <span className="mt-1 block text-[11px] text-slate-500">
+                Editá solo si necesitás corregir el correlativo. No puede repetir un número ya usado.
+              </span>
             </label>
           )}
           <label className="block">
