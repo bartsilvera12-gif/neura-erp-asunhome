@@ -25,6 +25,7 @@ interface VentaRow {
 }
 
 interface VentaItemRow {
+  id: string;
   venta_id: string;
   producto_id: string;
   producto_nombre: string;
@@ -45,6 +46,7 @@ function num(v: number | string): number {
 
 function mapItems(rows: VentaItemRow[]): LineaVenta[] {
   return rows.map((r) => ({
+    id: r.id,
     producto_id: r.producto_id,
     producto_nombre: r.producto_nombre,
     sku: r.sku,
@@ -141,7 +143,7 @@ export async function GET(request: NextRequest) {
     const itemsQ = await ctx.supabase
       .from("ventas_items")
       .select(
-        "venta_id, producto_id, producto_nombre, sku, cantidad, precio_venta_original, precio_venta, tipo_iva, tipo_precio, subtotal, monto_iva, total_linea"
+        "id, venta_id, producto_id, producto_nombre, sku, cantidad, precio_venta_original, precio_venta, tipo_iva, tipo_precio, subtotal, monto_iva, total_linea"
       )
       .eq("empresa_id", empresaId);
     if (itemsQ.error) throw new Error(itemsQ.error.message);

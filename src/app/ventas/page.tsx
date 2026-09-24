@@ -99,6 +99,7 @@ export default function VentasPage() {
   const [editarTarget, setEditarTarget] = useState<Venta | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [reimprimiendoId, setReimprimiendoId] = useState<string | null>(null);
+  const [cambiarTarget, setCambiarTarget] = useState<Venta | null>(null);
   const [devolucionesOn, setDevolucionesOn] = useState(false);
   const [devolverVentaId, setDevolverVentaId] = useState<string | null>(null);
   // El usuario Armando (armando@admin.com) no edita ventas: se le oculta el botón "Editar".
@@ -515,6 +516,16 @@ export default function VentasPage() {
                               Editar
                             </button>
                           )}
+                          {!isAnulada && !ocultarEditar && (
+                            <button
+                              type="button"
+                              onClick={() => setCambiarTarget(v)}
+                              className="inline-flex items-center justify-center rounded-md border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700 hover:bg-purple-100 transition-colors"
+                              title="Cambiar un producto de la venta por otro (ajusta stock, IVA, total y caja). Mantiene el mismo número de factura."
+                            >
+                              Cambiar producto
+                            </button>
+                          )}
                           {!isAnulada && !v.origen_guarda && (
                             <button
                               type="button"
@@ -581,6 +592,16 @@ export default function VentasPage() {
           onClose={() => setEditarTarget(null)}
           onDone={() => {
             setEditarTarget(null);
+            setReloadKey((k) => k + 1);
+          }}
+        />
+      )}
+      {cambiarTarget && (
+        <CambiarProductoModal
+          venta={cambiarTarget}
+          onClose={() => setCambiarTarget(null)}
+          onDone={() => {
+            setCambiarTarget(null);
             setReloadKey((k) => k + 1);
           }}
         />
@@ -980,6 +1001,174 @@ function Fila({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between text-slate-600">
       <span>{label}</span>
       <span className="tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+// ── Modal: cambiar un producto de la venta por otro (ajusta stock/IVA/total/caja) ──
+
+type ProdHit = { id: string; nombre: string; sku: string; precio_venta: number; stock_actual: number };
+
+function CambiarProductoModal({ venta, onClose, onDone }: { venta: Venta; onClose: () => void; onDone: () => void }) {
+  const items = venta.items ?? [];
+  const [itemId, setItemId] = useState<string>(items[0]?.id ?? "");
+  const itemSel = items.find((i) => i.id === itemId) ?? items[0];
+
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<ProdHit[]>([]);
+  const [buscando, setBuscando] = useState(false);
+  const [nuevo, setNuevo] = useState<ProdHit | null>(null);
+  const [cantidad, setCantidad] = useState<number>(itemSel?.cantidad ?? 1);
+  const [precio, setPrecio] = useState<number>(0);
+  const [tipoIva, setTipoIva] = useState<TipoIvaVenta>((itemSel?.tipo_iva as TipoIvaVenta) ?? "10%");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Búsqueda de productos (debounce).
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setHits([]); return; }
+    let vivo = true;
+    setBuscando(true);
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/productos?q=${encodeURIComponent(q)}&limit=20`, { credentials: "include", cache: "no-store" });
+        const j = await r.json();
+        if (!vivo) return;
+        const arr = (j?.productos ?? j?.data?.productos ?? []) as ProdHit[];
+        setHits(Array.isArray(arr) ? arr.slice(0, 20) : []);
+      } catch { if (vivo) setHits([]); }
+      finally { if (vivo) setBuscando(false); }
+    }, 250);
+    return () => { vivo = false; clearTimeout(t); };
+  }, [query]);
+
+  function elegir(p: ProdHit) {
+    setNuevo(p);
+    setPrecio(Number(p.precio_venta) || 0);
+    setHits([]);
+    setQuery("");
+  }
+
+  const totalLineaNuevo = Math.round((cantidad || 0) * (precio || 0));
+  const totalVentaNuevo = venta.total - (itemSel?.total_linea ?? 0) + totalLineaNuevo;
+  const diferencia = totalVentaNuevo - venta.total;
+  const gs = (n: number) => `Gs. ${Math.round(n).toLocaleString("es-PY")}`;
+
+  async function submit() {
+    if (!itemSel?.id) { setError("No se pudo identificar el producto a cambiar. Refrescá la página."); return; }
+    if (!nuevo) { setError("Elegí el producto nuevo."); return; }
+    if (!(cantidad > 0)) { setError("La cantidad debe ser mayor a 0."); return; }
+    setLoading(true); setError(null);
+    try {
+      const r = await fetch(`/api/ventas/${venta.id}/cambiar-producto`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item_id: itemSel.id, nuevo_producto_id: nuevo.id, cantidad, precio_venta: precio, tipo_iva: tipoIva }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j?.success === false) throw new Error(j?.error ?? "No se pudo cambiar el producto.");
+      const dif = Number(j?.diferencia ?? diferencia);
+      const msg = dif > 0 ? `Cobrá ${gs(dif)} más al cliente.` : dif < 0 ? `Devolvé ${gs(-dif)} al cliente.` : "Sin diferencia de importe.";
+      alert(`Producto cambiado. ${msg}`);
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo cambiar el producto.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-md overflow-hidden rounded-2xl border-2 border-purple-200 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="border-b border-slate-100 bg-gradient-to-r from-purple-50 to-transparent px-5 py-4">
+          <h3 className="text-base font-bold text-slate-800">Cambiar producto · {venta.numero_control}</h3>
+          <p className="mt-1 text-xs text-slate-500">Ajusta stock, IVA y total, y la caja del día. Mantiene el mismo N.º de factura.</p>
+        </div>
+        <div className="max-h-[70vh] overflow-y-auto p-5 space-y-4">
+          {items.length > 1 && (
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">Producto a cambiar</span>
+              <select value={itemId} onChange={(e) => setItemId(e.target.value)} disabled={loading}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white outline-none focus:border-purple-400">
+                {items.map((i) => (
+                  <option key={i.id ?? i.producto_id} value={i.id ?? ""}>{i.producto_nombre} — {gs(i.total_linea)}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            Actual: <b>{itemSel?.producto_nombre}</b> · {itemSel?.cantidad} × {gs(itemSel?.precio_venta ?? 0)} = {gs(itemSel?.total_linea ?? 0)}
+          </div>
+
+          {!nuevo ? (
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">Nuevo producto</span>
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por nombre o SKU…" disabled={loading}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-purple-400" />
+              {buscando && <p className="mt-1 text-[11px] text-slate-400">Buscando…</p>}
+              {hits.length > 0 && (
+                <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
+                  {hits.map((p) => (
+                    <button key={p.id} type="button" onClick={() => elegir(p)}
+                      className="block w-full px-3 py-2 text-left text-sm hover:bg-purple-50">
+                      <span className="font-medium text-slate-800">{p.nombre}</span>
+                      <span className="block text-[11px] text-slate-500">{p.sku} · {gs(p.precio_venta)} · stock {p.stock_actual}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </label>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between rounded-lg border border-purple-200 bg-purple-50 px-3 py-2">
+                <span className="text-sm font-semibold text-purple-800">{nuevo.nombre}</span>
+                <button type="button" onClick={() => setNuevo(null)} className="text-xs text-purple-600 hover:underline">Cambiar</button>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <label className="block">
+                  <span className="text-[11px] font-medium text-slate-600">Cantidad</span>
+                  <input type="number" min={1} value={cantidad} onChange={(e) => setCantidad(Math.max(1, Math.trunc(Number(e.target.value) || 0)))} disabled={loading}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-right text-sm outline-none focus:border-purple-400" />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-medium text-slate-600">Precio</span>
+                  <input type="number" min={0} value={precio} onChange={(e) => setPrecio(Math.max(0, Number(e.target.value) || 0))} disabled={loading}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-right text-sm outline-none focus:border-purple-400" />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-medium text-slate-600">IVA</span>
+                  <select value={tipoIva} onChange={(e) => setTipoIva(e.target.value as TipoIvaVenta)} disabled={loading}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm bg-white outline-none focus:border-purple-400">
+                    <option value="10%">10%</option>
+                    <option value="5%">5%</option>
+                    <option value="EXENTA">Exenta</option>
+                  </select>
+                </label>
+              </div>
+              <div className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                <Fila label="Total nuevo de la línea" value={gs(totalLineaNuevo)} />
+                <Fila label="Total nuevo de la venta" value={gs(totalVentaNuevo)} />
+                <div className={`mt-1 flex items-center justify-between font-semibold ${diferencia > 0 ? "text-emerald-700" : diferencia < 0 ? "text-rose-700" : "text-slate-600"}`}>
+                  <span>{diferencia > 0 ? "A cobrar" : diferencia < 0 ? "A devolver" : "Diferencia"}</span>
+                  <span className="tabular-nums">{gs(Math.abs(diferencia))}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>}
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} disabled={loading}
+              className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
+            <button type="button" onClick={submit} disabled={loading || !nuevo}
+              className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-bold text-white hover:bg-purple-700 disabled:opacity-50">
+              {loading ? "Guardando…" : "Cambiar producto"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

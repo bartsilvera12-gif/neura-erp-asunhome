@@ -8,6 +8,9 @@ export type TipoPrecioVenta = "minorista" | "mayorista" | "distribuidor" | "cost
 
 /** Un ítem dentro de una venta (una línea de producto). */
 export interface LineaVenta {
+  /** id de la fila ventas_items (para editar/cambiar el producto). Opcional: no
+   *  todos los flujos lo traen. */
+  id?:                   string;
   producto_id:           string;
   producto_nombre:       string;
   sku:                   string;
