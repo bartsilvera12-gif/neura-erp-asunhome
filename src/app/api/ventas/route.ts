@@ -228,8 +228,11 @@ export async function GET(request: NextRequest) {
         vendedor_id: (r as unknown as { vendedor_id?: string | null }).vendedor_id ?? null,
         vendedor_nombre: (r as unknown as { vendedor_nombre?: string | null }).vendedor_nombre ?? null,
         factura_id: r.factura_id ?? null,
-        numero_factura: (r.factura_id ? numeroFacturaByIdMap.get(r.factura_id) : undefined)
-          ?? numeroAutoByVentaMap.get(r.id)
+        // Prioridad: el número FÍSICO de la preimpresa (autoimpresor, 001-001-…) es el
+        // que va en el talonario y ve el cliente; se muestra primero. El número ERP
+        // (FAC-…) queda como respaldo si la venta no tuviera autoimpresor.
+        numero_factura: numeroAutoByVentaMap.get(r.id)
+          ?? (r.factura_id ? numeroFacturaByIdMap.get(r.factura_id) : undefined)
           ?? null,
         factura_estado_sifen: r.factura_id ? estadoSifenByFacturaMap.get(r.factura_id) ?? null : null,
         estado: ((): "activa" | "anulada" | "parcialmente_devuelta" | "devuelta_total" => {

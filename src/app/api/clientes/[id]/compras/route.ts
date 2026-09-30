@@ -167,9 +167,10 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
         total: num(v.total),
         tipo_venta: v.tipo_venta === "CREDITO" ? "CREDITO" : "CONTADO",
         estado,
-        // Nº real del comprobante: factura ERP (SIFEN) si existe; si no, el número
-        // completo de la factura autoimpresor ya emitida; si ninguna, null → "Sin factura".
-        numero_factura: numeroFacturaByVentaId.get(v.id) ?? numeroAutoByVentaId.get(v.id) ?? null,
+        // Nº real del comprobante: se prioriza el número FÍSICO de la preimpresa
+        // (autoimpresor, 001-001-…), que es el del talonario; la factura ERP (FAC-…)
+        // queda de respaldo. Si ninguna, null → "Sin factura".
+        numero_factura: numeroAutoByVentaId.get(v.id) ?? numeroFacturaByVentaId.get(v.id) ?? null,
         productos: itemsByVenta.get(v.id) ?? [],
       };
     });
