@@ -366,51 +366,77 @@ export async function setNumeroFacturaAutoimpresor(
   try {
     await client.query("BEGIN");
 
+    // Config (est/punto/timbrado/vigencias + rango). Necesaria tanto para editar
+    // como para CREAR la factura de una venta vieja que aún no tiene número.
+    const cfgQ = await client.query(
+      `SELECT establecimiento_codigo AS est, punto_expedicion_codigo AS punto, timbrado_numero AS timbrado,
+              timbrado_inicio_vigencia AS vini, timbrado_fin_vigencia AS vfin,
+              numero_inicial, numero_final, numero_actual
+         FROM ${tConfig} WHERE empresa_id = $1::uuid FOR UPDATE`,
+      [empresaId]
+    );
+    const cfg = cfgQ.rows[0] as Record<string, unknown> | undefined;
+    if (!cfg) throw new Error("No hay configuración de autoimpresor para asignar el número.");
+    const ni = num(cfg.numero_inicial);
+    const nf = num(cfg.numero_final);
+    if (ni && nf && (nuevoSeq < ni || nuevoSeq > nf)) {
+      throw new Error(`El número debe estar entre ${ni} y ${nf} (rango del timbrado).`);
+    }
+
+    // Factura existente de la venta (si la tiene).
     const prevQ = await client.query(
       `SELECT id, establecimiento_codigo AS est, punto_expedicion_codigo AS punto
          FROM ${tFactura} WHERE empresa_id = $1::uuid AND venta_id = $2::uuid
         ORDER BY numero_secuencia DESC LIMIT 1 FOR UPDATE`,
       [empresaId, ventaId]
     );
-    if (!prevQ.rows[0]) {
-      throw new Error("La venta no tiene una factura emitida para editarle el número.");
-    }
-    const row = prevQ.rows[0] as Record<string, unknown>;
-    const facturaId = String(row.id);
-    const est = String(row.est ?? "");
-    const punto = String(row.punto ?? "");
+    const existente = prevQ.rows[0] as Record<string, unknown> | undefined;
+    const est = String((existente?.est ?? cfg.est) ?? "");
+    const punto = String((existente?.punto ?? cfg.punto) ?? "");
 
-    // Rango del timbrado.
-    const cfgQ = await client.query(
-      `SELECT numero_inicial, numero_final, numero_actual FROM ${tConfig} WHERE empresa_id = $1::uuid FOR UPDATE`,
-      [empresaId]
-    );
-    const cfg = cfgQ.rows[0] as Record<string, unknown> | undefined;
-    if (cfg) {
-      const ni = num(cfg.numero_inicial);
-      const nf = num(cfg.numero_final);
-      if (nuevoSeq < ni || nuevoSeq > nf) {
-        throw new Error(`El número debe estar entre ${ni} y ${nf} (rango del timbrado).`);
-      }
-    }
-
-    // Que no lo tenga otra factura.
-    const dupQ = await client.query(
-      `SELECT 1 FROM ${tFactura} WHERE empresa_id = $1::uuid AND numero_secuencia = $2::integer AND id <> $3::uuid LIMIT 1`,
-      [empresaId, nuevoSeq, facturaId]
-    );
+    // Que no lo tenga OTRA factura (evita duplicados en el correlativo).
+    const dupQ = existente
+      ? await client.query(`SELECT 1 FROM ${tFactura} WHERE empresa_id=$1::uuid AND numero_secuencia=$2::integer AND id<>$3::uuid LIMIT 1`, [empresaId, nuevoSeq, existente.id])
+      : await client.query(`SELECT 1 FROM ${tFactura} WHERE empresa_id=$1::uuid AND numero_secuencia=$2::integer LIMIT 1`, [empresaId, nuevoSeq]);
     if (dupQ.rows[0]) {
       throw new Error(`El número ${formatNumeroFiscal(est, punto, nuevoSeq)} ya está usado por otra factura.`);
     }
 
     const numeroCompleto = formatNumeroFiscal(est, punto, nuevoSeq);
-    const updQ = await client.query(
-      `UPDATE ${tFactura} SET numero_secuencia = $2::integer, numero_completo = $3 WHERE id = $1::uuid RETURNING ${FA_COLS}`,
-      [facturaId, nuevoSeq, numeroCompleto]
-    );
+    let resultRow: Record<string, unknown>;
+
+    if (existente) {
+      const updQ = await client.query(
+        `UPDATE ${tFactura} SET numero_secuencia = $2::integer, numero_completo = $3 WHERE id = $1::uuid RETURNING ${FA_COLS}`,
+        [existente.id, nuevoSeq, numeroCompleto]
+      );
+      resultRow = updQ.rows[0] as Record<string, unknown>;
+    } else {
+      // CREAR la factura desde los datos de la venta (facturas viejas sin número).
+      const tVenta = quoteSchemaTable(schema, "ventas");
+      const tItems = quoteSchemaTable(schema, "ventas_items");
+      const vQ = await client.query(`SELECT tipo_venta FROM ${tVenta} WHERE id=$1::uuid AND empresa_id=$2::uuid LIMIT 1`, [ventaId, empresaId]);
+      if (!vQ.rows[0]) throw new Error("Venta no encontrada.");
+      const condicion: "contado" | "credito" = String((vQ.rows[0] as Record<string, unknown>).tipo_venta ?? "").toUpperCase() === "CREDITO" ? "credito" : "contado";
+      const iQ = await client.query(`SELECT tipo_iva, total_linea, monto_iva FROM ${tItems} WHERE venta_id=$1::uuid AND empresa_id=$2::uuid`, [ventaId, empresaId]);
+      const liq = liquidarIva(iQ.rows as ItemIva[]);
+      const insQ = await client.query(
+        `INSERT INTO ${tFactura} (
+           empresa_id, venta_id, numero_secuencia, numero_completo,
+           establecimiento_codigo, punto_expedicion_codigo, timbrado_numero,
+           timbrado_inicio_vigencia, timbrado_fin_vigencia, condicion,
+           gravado_10, iva_10, gravado_5, iva_5, exentas, total
+         ) VALUES ($1::uuid,$2::uuid,$3::integer,$4,$5,$6,$7,$8::date,$9::date,$10,$11,$12,$13,$14,$15,$16)
+         RETURNING ${FA_COLS}`,
+        [empresaId, ventaId, nuevoSeq, numeroCompleto, est, punto, String(cfg.timbrado ?? ""),
+         cfg.vini ?? null, cfg.vfin ?? null, condicion,
+         liq.gravado_10, liq.iva_10, liq.gravado_5, liq.iva_5, liq.exentas, liq.total]
+      );
+      resultRow = insQ.rows[0] as Record<string, unknown>;
+    }
 
     // Adelantar el contador si hace falta, para no colisionar en la próxima emisión.
-    if (cfg && num(cfg.numero_actual) <= nuevoSeq) {
+    if (num(cfg.numero_actual) <= nuevoSeq) {
       await client.query(
         `UPDATE ${tConfig} SET numero_actual = $2::integer, updated_at = now() WHERE empresa_id = $1::uuid`,
         [empresaId, nuevoSeq + 1]
@@ -418,7 +444,7 @@ export async function setNumeroFacturaAutoimpresor(
     }
 
     await client.query("COMMIT");
-    return mapRow(updQ.rows[0] as Record<string, unknown>);
+    return mapRow(resultRow);
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
     throw e;

@@ -758,9 +758,10 @@ function EditarVentaModal({
     setLoading(true);
     setError(null);
     try {
-      // 1) N.º de factura (si cambió y la venta tiene número). Se hace primero
-      //    porque valida rango/duplicado; si falla, no se toca el resto.
-      if (numeroFacturaActual && numeroSeq && numeroSeq !== seqActual) {
+      // 1) N.º de factura: si cambió, o si se asigna uno a una venta que no lo
+      //    tenía (facturas viejas). Se hace primero porque valida rango/duplicado;
+      //    si falla, no se toca el resto.
+      if (numeroSeq && numeroSeq !== seqActual) {
         const rN = await fetch(`/api/ventas/${venta.id}/factura-preimpresa/numero`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -834,24 +835,25 @@ function EditarVentaModal({
               <span className="mt-1 block text-[11px] text-slate-500">Cambia a quién se le acredita la comisión de esta venta.</span>
             </label>
           )}
-          {numeroFacturaActual && (
-            <label className="block">
-              <span className="text-sm font-medium text-slate-700">N.º de factura</span>
-              <div className="mt-1 flex items-center gap-2">
-                <span className="font-mono text-sm text-slate-500">{numeroPrefijo}</span>
-                <input
-                  value={numeroSeq}
-                  onChange={(e) => setNumeroSeq(e.target.value.replace(/\D/g, "").slice(0, 7))}
-                  inputMode="numeric"
-                  className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20 outline-none"
-                  disabled={loading}
-                />
-              </div>
-              <span className="mt-1 block text-[11px] text-slate-500">
-                Editá solo si necesitás corregir el correlativo. No puede repetir un número ya usado.
-              </span>
-            </label>
-          )}
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">N.º de factura</span>
+            <div className="mt-1 flex items-center gap-2">
+              {numeroPrefijo && <span className="font-mono text-sm text-slate-500">{numeroPrefijo}</span>}
+              <input
+                value={numeroSeq}
+                onChange={(e) => setNumeroSeq(e.target.value.replace(/\D/g, "").slice(0, 7))}
+                inputMode="numeric"
+                placeholder={numeroFacturaActual ? "" : "Ej: 5040"}
+                className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20 outline-none"
+                disabled={loading}
+              />
+            </div>
+            <span className="mt-1 block text-[11px] text-slate-500">
+              {numeroFacturaActual
+                ? "Editá solo si necesitás corregir el correlativo. No puede repetir un número ya usado."
+                : "Asigná el N.º de la factura física (para facturas viejas sin número). Escribí solo el número; no puede repetir uno ya usado."}
+            </span>
+          </label>
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Observaciones</span>
             <textarea
