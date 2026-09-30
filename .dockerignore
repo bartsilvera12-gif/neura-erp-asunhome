@@ -1,16 +1,18 @@
-.git
-.github
+# Dependencias y build: se regeneran dentro del contenedor
 node_modules
 .next
 out
-build
-coverage
-npm-debug.log*
-.DS_Store
-.env
-.env.*
-!.env.example
-supabase/.temp
-supabase/.branches
-e2e-super-admin*.png
-*.tsbuildinfo
+
+# Git y metadatos
+.git
+.gitignore
+.cursor
+.claude
+.mcp.json
+
+# Env: los inyecta Coolify, no van en la imagen
+.env*
+
+# Docs (no los usa la app en runtime)
+docs
+*.md
