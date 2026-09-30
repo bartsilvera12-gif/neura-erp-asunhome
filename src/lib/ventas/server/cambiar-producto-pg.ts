@@ -89,11 +89,17 @@ export async function cambiarProductoVenta(
     if (String(v.tipo_venta).toUpperCase() === "CREDITO") throw new CambiarProductoError("Por ahora solo ventas al contado.");
     if (String(v.metodo_pago) === "mixto") throw new CambiarProductoError("Por ahora no se puede en ventas con pago mixto.");
 
-    // 2) Caja del día abierta.
-    if (!v.caja_id) throw new CambiarProductoError("La venta no está asociada a una caja; no se puede ajustar.");
-    const cQ = await client.query(`SELECT estado FROM ${tCajas} WHERE id=$1::uuid AND empresa_id=$2::uuid`, [v.caja_id, empresaId]);
-    if (!cQ.rows[0] || String((cQ.rows[0] as Record<string, unknown>).estado) !== "abierta") {
-      throw new CambiarProductoError("La caja de esta venta ya está cerrada. No se puede cambiar el producto sin descuadrar un arqueo cerrado.");
+    // 2) Caja: SOLO el efectivo afecta el arqueo (el efectivo esperado del turno se
+    // deriva de ventas.total). Por eso, para ventas en EFECTIVO exigimos que su caja
+    // siga ABIERTA (así el ajuste cae en el turno correcto). Las ventas por
+    // TRANSFERENCIA/TARJETA no tocan el efectivo físico del arqueo → se permiten
+    // aunque la caja del día ya esté cerrada (poder corregir facturas anteriores).
+    if (String(v.metodo_pago) === "efectivo") {
+      if (!v.caja_id) throw new CambiarProductoError("La venta en efectivo no tiene caja asociada; no se puede ajustar.");
+      const cQ = await client.query(`SELECT estado FROM ${tCajas} WHERE id=$1::uuid AND empresa_id=$2::uuid`, [v.caja_id, empresaId]);
+      if (!cQ.rows[0] || String((cQ.rows[0] as Record<string, unknown>).estado) !== "abierta") {
+        throw new CambiarProductoError("Esta venta es en EFECTIVO y su caja ya cerró. Solo se puede cambiar el producto mientras la caja del día siga abierta (para no alterar un arqueo de efectivo cerrado).");
+      }
     }
 
     // 3) Ítem a cambiar (viejo).
