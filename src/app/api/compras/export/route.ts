@@ -14,6 +14,8 @@ export async function GET(request: NextRequest) {
     const rows = await listCompras(schema, empresaId);
     const buf = buildXlsxBuffer(rows, [
       { header: "NUMERO_CONTROL", value: (r) => r.numero_control, width: 16 },
+      { header: "NUMERO_FACTURA", value: (r) => r.numero_factura ?? "", width: 18 },
+      { header: "FECHA_FACTURA", value: (r) => r.fecha_factura ? new Date(r.fecha_factura) : "", width: 14 },
       { header: "FECHA", value: (r) => r.fecha ? new Date(r.fecha) : "", width: 18 },
       { header: "PROVEEDOR", value: (r) => r.proveedor_nombre, width: 30 },
       { header: "PRODUCTO", value: (r) => r.producto_nombre, width: 30 },

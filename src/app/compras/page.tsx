@@ -41,6 +41,7 @@ const tipoPagoBadge: Record<TipoPago, string> = {
 // ── Agrupación por numero_control: 1 compra = N filas ─────────────────────────
 type GrupoCompra = {
   numero_control: string;
+  numero_factura: string | null;
   proveedor_nombre: string;
   fecha: string;
   tipo_pago: TipoPago;
@@ -60,6 +61,7 @@ function agrupar(rows: Compra[]): GrupoCompra[] {
     if (!g) {
       g = {
         numero_control: c.numero_control,
+        numero_factura: c.numero_factura ?? null,
         proveedor_nombre: c.proveedor_nombre,
         fecha: c.fecha,
         tipo_pago: c.tipo_pago,
@@ -128,6 +130,7 @@ export default function ComprasPage() {
         busqueda,
         g.proveedor_nombre,
         g.numero_control,
+        g.numero_factura ?? "",
         ...g.items.map((i) => i.producto_nombre),
       );
       const coincideTipoPago = filtroTipoPago === "" || g.tipo_pago === filtroTipoPago;
@@ -260,7 +263,7 @@ export default function ComprasPage() {
 
         {/* Filtros */}
         <div className="flex flex-wrap items-center gap-3 mb-5 pb-5 border-b border-gray-100">
-          <input type="text" placeholder="Buscar por proveedor, producto o N° control..."
+          <input type="text" placeholder="Buscar por proveedor, N° de factura, producto o N° control..."
             value={busqueda} onChange={(e) => setBusqueda(e.target.value)}
             className={`${inputFilterClass} min-w-0 flex-1 sm:min-w-72`} />
           <FancySelect value={filtroTipoPago} onChange={(v) => setFiltroTipoPago(v as TipoPago | "")}
@@ -287,6 +290,7 @@ export default function ComprasPage() {
             <thead>
               <tr className="border-b text-gray-500">
                 <th className="py-3 pr-4 font-medium">N° Control</th>
+                <th className="py-3 pr-4 font-medium">N° Factura</th>
                 <th className="py-3 pr-4 font-medium">Proveedor</th>
                 <th className="py-3 pr-4 font-medium">Productos</th>
                 <th className="py-3 pr-4 font-medium text-right">Ítems</th>
@@ -299,7 +303,7 @@ export default function ComprasPage() {
             <tbody>
               {filtrados.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-gray-400">
+                  <td colSpan={9} className="py-12 text-center text-gray-400">
                     {grupos.length === 0 ? "No hay compras registradas" : "Ninguna compra coincide con los filtros"}
                   </td>
                 </tr>
@@ -321,6 +325,10 @@ export default function ComprasPage() {
                               Anulada
                             </span>
                           )}
+                        </td>
+                        {/* N° de factura del proveedor (para conciliar con sus extractos). */}
+                        <td className="py-4 pr-4 font-mono text-xs text-gray-700">
+                          {g.numero_factura || <span className="text-gray-300">—</span>}
                         </td>
                         <td className="py-4 pr-4 font-medium text-gray-800">{g.proveedor_nombre}</td>
                         <td className="py-4 pr-4 text-gray-600">
@@ -400,6 +408,7 @@ export default function ComprasPage() {
                         <tr key={it.id} className="border-b border-slate-100 bg-slate-50/50 text-xs">
                           <td className="py-2 pr-4" />
                           <td className="py-2 pr-4" />
+                          <td className="py-2 pr-4" />
                           <td className="py-2 pr-4 text-gray-700">
                             <span className="font-medium">{it.producto_nombre}</span>
                             <span className="ml-2 font-mono text-gray-400">{formatGs(it.costo_unitario)}/u</span>
@@ -419,7 +428,7 @@ export default function ComprasPage() {
             {filtrados.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold text-gray-800">
-                  <td colSpan={4} className="py-3 pr-4 text-right text-sm">
+                  <td colSpan={5} className="py-3 pr-4 text-right text-sm">
                     Total de compras <span className="font-normal text-gray-500">(sin anuladas)</span>
                   </td>
                   <td className="py-3 pr-4 text-right tabular-nums text-sm">
