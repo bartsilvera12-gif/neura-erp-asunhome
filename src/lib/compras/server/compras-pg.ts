@@ -95,6 +95,7 @@ export interface CompraRow {
   updated_at: string;
   created_by: string | null;
   usuario_nombre: string | null;
+  linea_orden: number | null;
 }
 
 const COLS = `
@@ -106,7 +107,7 @@ const COLS = `
   numero_control, estado, fecha,
   comprobante_url, comprobante_storage_path, comprobante_nombre, comprobante_mime_type,
   anulada_at, anulada_por, anulada_motivo,
-  created_at, updated_at, created_by, usuario_nombre
+  created_at, updated_at, created_by, usuario_nombre, linea_orden
 `;
 
 export interface InsertCompraInput {
@@ -139,7 +140,8 @@ export async function listCompras(
   const schema = assertAllowedChatDataSchema(schemaRaw);
   const t = quoteSchemaTable(schema, "compras");
   const { rows } = await pool().query<CompraRow>(
-    `SELECT ${COLS} FROM ${t} WHERE empresa_id = $1::uuid ORDER BY fecha DESC LIMIT 500`,
+    `SELECT ${COLS} FROM ${t} WHERE empresa_id = $1::uuid
+      ORDER BY fecha DESC, numero_control DESC, linea_orden ASC NULLS LAST, created_at ASC LIMIT 500`,
     [empresaId]
   );
   return rows;
@@ -253,7 +255,7 @@ export async function insertComprasConImpactoTx(
     : await nextNumeroControl(client, schema, empresaId);
   const estadoFila = header.estado === "provisoria" ? "provisoria" : "registrada";
 
-  for (const it of items) {
+  for (const [lineaOrden, it] of items.entries()) {
     const { rows: compraRows } = await client.query<CompraRow>(
       `INSERT INTO ${tC} (
          empresa_id, proveedor_id, proveedor_nombre, producto_id, producto_nombre,
@@ -263,7 +265,7 @@ export async function insertComprasConImpactoTx(
          orden_compra_numero, orden_compra_item_id,
          numero_control, estado, fecha,
          comprobante_url, comprobante_storage_path, comprobante_nombre, comprobante_mime_type,
-         created_by, usuario_nombre
+         created_by, usuario_nombre, linea_orden
        ) VALUES (
          $1::uuid, $2::uuid, $3, $4::uuid, $5,
          $6::numeric, $7, $8::numeric, $9::numeric, $10::numeric,
@@ -272,7 +274,7 @@ export async function insertComprasConImpactoTx(
          $23, $24::uuid,
          $25, $33, COALESCE($32::timestamptz, now()),
          $26, $27, $28, $29,
-         $30::uuid, $31
+         $30::uuid, $31, $34::integer
        )
        RETURNING ${COLS}`,
       [
@@ -290,6 +292,7 @@ export async function insertComprasConImpactoTx(
         header.created_by, header.usuario_nombre,
         header.fecha ?? null,
         estadoFila,
+        lineaOrden + 1,
       ]
     );
     insertedRows.push(compraRows[0]);
@@ -647,20 +650,20 @@ export async function editarCompraCompleta(
     // ni crear otro movimiento (ya lo hizo el ajuste por diferencia de arriba).
     await client.query(`DELETE FROM ${tC} WHERE empresa_id = $1::uuid AND numero_control = $2`, [empresaId, numeroControl]);
     const insertedRows: CompraRow[] = [];
-    for (const it of items) {
+    for (const [lineaOrden, it] of items.entries()) {
       const { rows: cr } = await client.query<CompraRow>(
         `INSERT INTO ${tC} (
            empresa_id, proveedor_id, proveedor_nombre, producto_id, producto_nombre,
            cantidad, moneda, tipo_cambio, costo_unitario_original, costo_unitario,
            iva_tipo, subtotal, monto_iva, total, precio_venta, margen_venta,
            tipo_pago, plazo_dias, nro_timbrado, numero_factura, fecha_factura, observacion,
-           numero_control, estado, fecha, created_by, usuario_nombre
+           numero_control, estado, fecha, created_by, usuario_nombre, linea_orden
          ) VALUES (
            $1::uuid, $2::uuid, $3, $4::uuid, $5,
            $6::numeric, $7, $8::numeric, $9::numeric, $10::numeric,
            $11, $12::numeric, $13::numeric, $14::numeric, $15::numeric, $16::numeric,
            $17, $18::integer, $19, $20, $21::date, $22,
-           $23, $24, COALESCE($25::timestamptz, now()), $26::uuid, $27
+           $23, $24, COALESCE($25::timestamptz, now()), $26::uuid, $27, $28::integer
          ) RETURNING ${COLS}`,
         [
           empresaId, header.proveedor_id, header.proveedor_nombre, it.producto_id, it.producto_nombre,
@@ -669,6 +672,7 @@ export async function editarCompraCompleta(
           header.tipo_pago, header.plazo_dias, header.nro_timbrado, header.numero_factura,
           header.fecha_factura ?? null, header.observacion ?? null,
           numeroControl, estadoPrev, header.fecha ?? null, header.created_by, header.usuario_nombre,
+          lineaOrden + 1,
         ]
       );
       insertedRows.push(cr[0]);
@@ -741,7 +745,7 @@ export async function getCompraByNumeroControl(
             to_char(fecha,'YYYY-MM-DD') AS fecha, observacion, estado
        FROM ${tC}
       WHERE empresa_id = $1::uuid AND numero_control = $2 AND anulada_at IS NULL
-      ORDER BY id`,
+      ORDER BY linea_orden ASC NULLS LAST, created_at ASC, id`,
     [empresaId, numeroControl]
   );
   if (rows.length === 0) return null;

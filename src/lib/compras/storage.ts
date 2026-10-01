@@ -19,6 +19,7 @@ interface CompraApiRow {
   comprobante_mime_type?: string | null;
   anulada_at?: string | null;
   anulada_motivo?: string | null;
+  linea_orden?: number | null;
 }
 
 function mapRow(r: CompraApiRow): Compra {
@@ -53,6 +54,7 @@ function mapRow(r: CompraApiRow): Compra {
     comprobante_mime_type: r.comprobante_mime_type ?? null,
     anulada_at: r.anulada_at ?? null,
     anulada_motivo: r.anulada_motivo ?? null,
+    linea_orden: r.linea_orden ?? null,
     fecha: r.fecha,
   };
 }

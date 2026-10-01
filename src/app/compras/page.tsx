@@ -80,6 +80,10 @@ function agrupar(rows: Compra[]): GrupoCompra[] {
     if (c.comprobante_storage_path) g.comprobante = true;
     if (c.anulada_at) g.anulada = true;
   }
+  // Conservar el orden de carga de los ítems (= orden de la factura física).
+  for (const g of map.values()) {
+    g.items.sort((a, b) => (a.linea_orden ?? Number.MAX_SAFE_INTEGER) - (b.linea_orden ?? Number.MAX_SAFE_INTEGER));
+  }
   return [...map.values()].sort(
     (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()
   );

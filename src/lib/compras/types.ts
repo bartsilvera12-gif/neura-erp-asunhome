@@ -49,4 +49,8 @@ export interface Compra {
   // Anulación (soft delete). Si anulada_at != null, la compra fue revertida.
   anulada_at?: string | null;
   anulada_motivo?: string | null;
+
+  /** Posición de la línea dentro de la compra (1,2,3…), para conservar el orden
+   *  de carga = orden de la factura física. */
+  linea_orden?: number | null;
 }
