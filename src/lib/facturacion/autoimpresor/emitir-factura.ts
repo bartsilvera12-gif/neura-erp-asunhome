@@ -377,11 +377,10 @@ export async function setNumeroFacturaAutoimpresor(
     );
     const cfg = cfgQ.rows[0] as Record<string, unknown> | undefined;
     if (!cfg) throw new Error("No hay configuración de autoimpresor para asignar el número.");
-    const ni = num(cfg.numero_inicial);
-    const nf = num(cfg.numero_final);
-    if (ni && nf && (nuevoSeq < ni || nuevoSeq > nf)) {
-      throw new Error(`El número debe estar entre ${ni} y ${nf} (rango del timbrado).`);
-    }
+    // Asignación MANUAL: se permite cualquier número (incluidos los de timbrados
+    // ANTERIORES, por debajo del rango actual), porque el usuario carga facturas
+    // físicas históricas y conoce el número real. El rango del timbrado solo se
+    // valida en la emisión AUTOMÁTICA (emitirFacturaAutoimpresor), no acá.
 
     // Factura existente de la venta (si la tiene).
     const prevQ = await client.query(
@@ -394,12 +393,26 @@ export async function setNumeroFacturaAutoimpresor(
     const est = String((existente?.est ?? cfg.est) ?? "");
     const punto = String((existente?.punto ?? cfg.punto) ?? "");
 
-    // Que no lo tenga OTRA factura (evita duplicados en el correlativo).
-    const dupQ = existente
-      ? await client.query(`SELECT 1 FROM ${tFactura} WHERE empresa_id=$1::uuid AND numero_secuencia=$2::integer AND id<>$3::uuid LIMIT 1`, [empresaId, nuevoSeq, existente.id])
-      : await client.query(`SELECT 1 FROM ${tFactura} WHERE empresa_id=$1::uuid AND numero_secuencia=$2::integer LIMIT 1`, [empresaId, nuevoSeq]);
-    if (dupQ.rows[0]) {
-      throw new Error(`El número ${formatNumeroFiscal(est, punto, nuevoSeq)} ya está usado por otra factura.`);
+    // ¿Otra factura ya tiene ese número? Si está en una venta ANULADA, se libera
+    // (físicamente ese número es una factura válida que corresponde a otra venta);
+    // si está en una venta ACTIVA, es un duplicado real y se bloquea.
+    const tVentasDup = quoteSchemaTable(schema, "ventas");
+    const dupQ = await client.query(
+      `SELECT fa.id::text AS id, v.estado AS estado, v.numero_control AS nc
+         FROM ${tFactura} fa JOIN ${tVentasDup} v ON v.id = fa.venta_id
+        WHERE fa.empresa_id=$1::uuid AND fa.numero_secuencia=$2::integer
+          ${existente ? "AND fa.id <> $3::uuid" : ""}
+        LIMIT 1`,
+      existente ? [empresaId, nuevoSeq, existente.id] : [empresaId, nuevoSeq]
+    );
+    const dup = dupQ.rows[0] as Record<string, unknown> | undefined;
+    if (dup) {
+      if (String(dup.estado) === "anulada") {
+        // Liberar el número de la venta anulada (queda anulada, sin número fiscal).
+        await client.query(`DELETE FROM ${tFactura} WHERE id = $1::uuid`, [String(dup.id)]);
+      } else {
+        throw new Error(`El número ${formatNumeroFiscal(est, punto, nuevoSeq)} ya está usado por otra factura (${String(dup.nc)}).`);
+      }
     }
 
     const numeroCompleto = formatNumeroFiscal(est, punto, nuevoSeq);
