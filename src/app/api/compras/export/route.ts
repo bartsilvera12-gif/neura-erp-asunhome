@@ -4,6 +4,15 @@ import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema"
 import { listCompras } from "@/lib/compras/server/compras-pg";
 import { buildXlsxBuffer, xlsxResponseHeaders, nowStamp } from "@/lib/excel/export";
 
+/** La fecha de compra/factura es un día de calendario guardado como medianoche UTC;
+ *  se formatea en UTC (DD/MM/YYYY) para que no retroceda un día por la zona horaria. */
+function fechaUtc(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
+}
+
 export async function GET(request: NextRequest) {
   const ctx = await getTenantSupabaseFromAuth(request);
   if (!ctx) return new Response("Unauthorized", { status: 401 });
@@ -15,8 +24,8 @@ export async function GET(request: NextRequest) {
     const buf = buildXlsxBuffer(rows, [
       { header: "NUMERO_CONTROL", value: (r) => r.numero_control, width: 16 },
       { header: "NUMERO_FACTURA", value: (r) => r.numero_factura ?? "", width: 18 },
-      { header: "FECHA_FACTURA", value: (r) => r.fecha_factura ? new Date(r.fecha_factura) : "", width: 14 },
-      { header: "FECHA", value: (r) => r.fecha ? new Date(r.fecha) : "", width: 18 },
+      { header: "FECHA_FACTURA", value: (r) => fechaUtc(r.fecha_factura), width: 14 },
+      { header: "FECHA", value: (r) => fechaUtc(r.fecha), width: 14 },
       { header: "PROVEEDOR", value: (r) => r.proveedor_nombre, width: 30 },
       { header: "PRODUCTO", value: (r) => r.producto_nombre, width: 30 },
       { header: "CANTIDAD", value: (r) => Number(r.cantidad), width: 10 },

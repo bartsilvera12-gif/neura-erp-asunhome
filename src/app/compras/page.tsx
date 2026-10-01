@@ -21,13 +21,14 @@ function formatGs(valor: number) {
 
 function formatFecha(iso: string) {
   try {
+    // La fecha de compra/orden es un DÍA de calendario, guardado como medianoche UTC
+    // (p.ej. "2026-10-01 00:00:00+00"). Se formatea en UTC para que muestre ese mismo
+    // día y no retroceda al anterior por la zona horaria de Paraguay (UTC-3).
     const d = new Date(iso);
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const yyyy = d.getFullYear();
-    const hh = String(d.getHours()).padStart(2, "0");
-    const min = String(d.getMinutes()).padStart(2, "0");
-    return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const yyyy = d.getUTCFullYear();
+    return `${dd}/${mm}/${yyyy}`;
   } catch {
     return iso;
   }
