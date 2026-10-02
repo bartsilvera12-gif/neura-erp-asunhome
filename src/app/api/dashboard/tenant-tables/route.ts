@@ -5,6 +5,7 @@ import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
 import { ymdInicioFinMesLocal } from "@/lib/fechas/calendario";
 import { getChatPostgresPool, quoteSchemaTable } from "@/lib/supabase/chat-pg-pool";
+import { inPorTandas } from "@/lib/supabase/in-por-tandas";
 import {
   assertAllowedChatDataSchema,
   isLikelyUnexposedTenantChatSchema,
@@ -335,11 +336,18 @@ export async function GET(request: NextRequest) {
       if (ventaIds.length === 0) {
         ventasItemsRows = [];
       } else {
-        const itemsRes = await supabase
-          .from("ventas_items")
-          .select("*")
-          .eq("empresa_id", empresaId)
-          .in("venta_id", ventaIds);
+        const itemsRes = await inPorTandas(
+          ventaIds,
+          (tanda, desde, hasta) =>
+            supabase
+              .from("ventas_items")
+              .select("*")
+              .eq("empresa_id", empresaId)
+              .in("venta_id", tanda)
+              .order("id", { ascending: true })
+              .range(desde, hasta),
+          { paginado: true }
+        );
         ventasItemsRows = pickRows("ventas_items", itemsRes, queryErrors);
         if ((ventasItemsRows.length === 0 && queryErrors.ventas_items) || (usarPg && ventasItemsRows.length === 0)) {
           ventasItemsRows = await fallbackVentasItemsPg(dataSchema, empresaId, ventaIds);

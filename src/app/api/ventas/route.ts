@@ -6,6 +6,7 @@ import { assertAllowedChatDataSchema } from "@/lib/supabase/chat-data-schema";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
 import type { Venta, LineaVenta, TipoIvaVenta, TipoPrecioVenta } from "@/lib/ventas/types";
+import { inPorTandas } from "@/lib/supabase/in-por-tandas";
 
 interface VentaRow {
   id: string;
@@ -177,11 +178,13 @@ export async function GET(request: NextRequest) {
     const ventaIds = ventasRows.map((v) => v.id);
     const guardaVentaIds = new Set<string>();
     if (ventaIds.length > 0) {
-      const resQ = await ctx.supabase
-        .from("reservas")
-        .select("venta_id")
-        .eq("empresa_id", empresaId)
-        .in("venta_id", ventaIds);
+      const resQ = await inPorTandas(ventaIds, (tanda) =>
+        ctx.supabase
+          .from("reservas")
+          .select("venta_id")
+          .eq("empresa_id", empresaId)
+          .in("venta_id", tanda)
+      );
       if (!resQ.error) {
         for (const row of (resQ.data ?? []) as Array<{ venta_id: string | null }>) {
           if (row.venta_id) guardaVentaIds.add(String(row.venta_id));
