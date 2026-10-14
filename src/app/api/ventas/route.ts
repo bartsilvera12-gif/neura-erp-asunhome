@@ -92,21 +92,25 @@ export async function GET(request: NextRequest) {
     const numeroFacturaByIdMap = new Map<string, string>();
     const estadoSifenByFacturaMap = new Map<string, string>();
     if (facturaIds.length > 0) {
-      const facQ = await ctx.supabase
-        .from("facturas")
-        .select("id, numero_factura")
-        .eq("empresa_id", empresaId)
-        .in("id", facturaIds);
+      const facQ = await inPorTandas(facturaIds, (tanda) =>
+        ctx.supabase
+          .from("facturas")
+          .select("id, numero_factura")
+          .eq("empresa_id", empresaId)
+          .in("id", tanda)
+      );
       if (!facQ.error) {
         for (const row of (facQ.data ?? []) as Array<{ id: string; numero_factura?: string | null }>) {
           if (row.numero_factura) numeroFacturaByIdMap.set(row.id, row.numero_factura);
         }
       }
-      const feQ = await ctx.supabase
-        .from("factura_electronica")
-        .select("factura_id, estado_sifen")
-        .eq("empresa_id", empresaId)
-        .in("factura_id", facturaIds);
+      const feQ = await inPorTandas(facturaIds, (tanda) =>
+        ctx.supabase
+          .from("factura_electronica")
+          .select("factura_id, estado_sifen")
+          .eq("empresa_id", empresaId)
+          .in("factura_id", tanda)
+      );
       if (!feQ.error) {
         for (const row of (feQ.data ?? []) as Array<{ factura_id: string; estado_sifen?: string | null }>) {
           if (row.estado_sifen) estadoSifenByFacturaMap.set(row.factura_id, row.estado_sifen);
@@ -159,11 +163,15 @@ export async function GET(request: NextRequest) {
     ];
     const clienteNombreById = new Map<string, string>();
     if (clienteIds.length > 0) {
-      const cliQ = await ctx.supabase
-        .from("clientes")
-        .select("id, empresa, nombre_contacto, nombre")
-        .eq("empresa_id", empresaId)
-        .in("id", clienteIds);
+      // Por tandas: con cientos de clientes un solo .in(...) pasa el límite de URL
+      // (414) y el listado quedaba sin ningún nombre de cliente. Ver in-por-tandas.
+      const cliQ = await inPorTandas(clienteIds, (tanda) =>
+        ctx.supabase
+          .from("clientes")
+          .select("id, empresa, nombre_contacto, nombre")
+          .eq("empresa_id", empresaId)
+          .in("id", tanda)
+      );
       if (!cliQ.error) {
         const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : "");
         for (const row of (cliQ.data ?? []) as Array<Record<string, unknown>>) {
