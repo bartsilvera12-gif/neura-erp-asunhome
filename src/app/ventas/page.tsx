@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { User } from "lucide-react";
 import EdgeScrollArea from "@/components/ui/EdgeScrollArea";
 import { FancySelect } from "@/components/ui/FancySelect";
 import ClienteSelectorBuscador from "@/components/clientes/ClienteSelectorBuscador";
@@ -75,6 +76,15 @@ function ResumenProductos({ v }: { v: Venta }) {
           </span>
         )}
       </div>
+      {v.cliente_nombre && (
+        <span
+          className="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-[#4FAEB2]/10 px-2 py-0.5 text-xs font-semibold text-[#3F8E91] normal-case"
+          title={v.cliente_nombre}
+        >
+          <User className="h-3 w-3 shrink-0" />
+          <span className="truncate max-w-[220px]">{v.cliente_nombre}</span>
+        </span>
+      )}
     </div>
   );
 }
@@ -390,11 +400,6 @@ export default function VentasPage() {
                             </span>
                           )}
                         </div>
-                        {v.cliente_nombre && (
-                          <div className="mt-1 font-sans text-[11px] font-medium text-slate-600 normal-case truncate max-w-[160px]" title={v.cliente_nombre}>
-                            {v.cliente_nombre}
-                          </div>
-                        )}
                       </td>
                       <td className="py-4 pr-4 align-middle">
                         <ResumenProductos v={v} />
