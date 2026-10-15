@@ -54,6 +54,9 @@ type MenuItem = {
   icon: React.ComponentType<{ className?: string }>;
   children?: { label: string; href: string; exactMatch?: boolean }[];
   showWhen?: string;
+  /** Si true, el ítem solo se marca activo en la ruta exacta (no en subrutas).
+   *  Útil cuando dos ítems comparten prefijo de href (ej: Productos y Inventario → /inventario). */
+  exactMatch?: boolean;
 };
 
 function menuChildPathActive(path: string, childHref: string, exactMatch?: boolean): boolean {
@@ -105,7 +108,7 @@ const MENU_STRUCTURE: MenuItem[] = [
   //   key: "monitoreo", slug: "monitoreo", label: "Monitoreo",
   //   href: "/dashboard/monitoreo", icon: Activity,
   // },
-  { key: "ventas", slug: "ventas", label: "Caja", href: "/ventas", icon: ShoppingCart },
+  { key: "ventas", slug: "ventas", label: "Ventas", href: "/ventas", icon: ShoppingCart },
   // Pedidos: vendedor arma pedidos en el salon; este listado es gestion
   // (ver/editar/cancelar). El cobro se hace desde la Caja (/ventas), que
   // muestra el listado "Pedidos por cobrar" embebido. Slug 'ventas' para
@@ -126,14 +129,19 @@ const MENU_STRUCTURE: MenuItem[] = [
   //   href: "/dashboard/proyectos", icon: Utensils,
   // },
   // { key: "recetas", slug: "recetas", label: "Recetas", href: "/dashboard/recetas", icon: ChefHat },
-  { key: "inventario", slug: "inventario", label: "Inventario", href: "/inventario", icon: Package, children: [
-    { label: "Productos", href: "/inventario" },
+  // Productos: se muestra en la familia "Comercial" (a pedido de ASUNHOME).
+  // Mismo slug `inventario` (hereda acceso) y apunta al listado de productos.
+  // exactMatch para que no se marque activo en las subrutas de Inventario.
+  { key: "productos", slug: "inventario", label: "Productos", href: "/inventario", icon: Package, exactMatch: true },
+  // Inventario (familia "Operaciones"): Productos salió a Comercial; acá quedan
+  // los mantenimientos. Orden a pedido de ASUNHOME.
+  { key: "inventario", slug: "inventario", label: "Inventario", href: "/inventario", icon: Package, exactMatch: true, children: [
     { label: "Movimientos", href: "/inventario/movimientos" },
-    { label: "Categorías", href: "/inventario/categorias" },
     { label: "Marcas", href: "/inventario/marcas" },
     { label: "Líneas de producto", href: "/inventario/lineas" },
     { label: "Números de serie", href: "/inventario/series" },
     { label: "Averiados", href: "/inventario/averiados" },
+    { label: "Categorías", href: "/inventario/categorias" },
     // ASUNHOME sí usa ubicaciones: separa stock de salón y de depósito.
     { label: "Depósitos / Ubicaciones", href: "/inventario/ubicaciones" },
   ]},
@@ -147,9 +155,9 @@ const MENU_STRUCTURE: MenuItem[] = [
     href: "/compras",
     icon: Package,
     children: [
-      { label: "Órdenes", href: "/compras" },
       { label: "Facturas provisorias", href: "/compras/provisorias" },
       { label: "Proveedores", href: "/proveedores" },
+      { label: "Órdenes", href: "/compras", exactMatch: true },
     ],
   },
   { key: "pagos", slug: "pagos", label: "Pagos", href: "/pagos", icon: Banknote },
@@ -214,11 +222,13 @@ const MENU_STRUCTURE: MenuItem[] = [
  * MENU_STRUCTURE; no cambia slugs, rutas, acceso ni permisos. Cada `keys` referencia
  * `MenuItem.key`. Los ítems sin familia caen en "Otros" (no se ocultan).
  */
+// Orden a pedido de ASUNHOME: Comercial → Compras → Operaciones → Finanzas.
 const MENU_FAMILIES: { id: string; titulo: string; keys: string[] }[] = [
   { id: "inicio", titulo: "Inicio", keys: ["dashboard"] },
-  { id: "comercial", titulo: "Comercial", keys: ["clientes", "crm", "gestion-clientes", "ventas", "presupuestos", "reservas", "comisiones", "planes"] },
+  { id: "comercial", titulo: "Comercial", keys: ["clientes", "ventas", "productos", "presupuestos", "reservas", "comisiones", "crm", "gestion-clientes", "planes"] },
+  { id: "compras", titulo: "Compras", keys: ["compras"] },
+  { id: "operaciones", titulo: "Operaciones", keys: ["inventario", "tecnico", "recetas", "proyectos"] },
   { id: "finanzas", titulo: "Finanzas", keys: ["pagos", "cuentas-por-pagar", "gastos", "otros_ingresos", "entidades_bancarias", "notas_credito", "reportes"] },
-  { id: "operaciones", titulo: "Operaciones", keys: ["inventario", "tecnico", "compras", "recetas", "proyectos"] },
   { id: "omnicanal", titulo: "Omnicanal", keys: ["conversaciones", "conversaciones-finalizadas", "historial-omnicanal", "monitoreo", "campanas"] },
   { id: "marketing", titulo: "Marketing y Automatización", keys: ["marketing", "marketing_ops", "sorteos"] },
   { id: "administracion", titulo: "Administración", keys: ["usuarios", "configuracion"] },
@@ -578,9 +588,10 @@ export default function Sidebar() {
       strict: strictAllowlist,
     });
 
-  const isActive = (slug: string, href: string) => {
+  const isActive = (slug: string, href: string, exactMatch?: boolean) => {
     const p = pathname ?? "";
     if (slug === "dashboard") return p === "/";
+    if (exactMatch) return p === href;
     return p === href || p.startsWith(href + "/");
   };
 
@@ -785,7 +796,7 @@ export default function Sidebar() {
                   key={item.key}
                   item={item}
                   itemId={slugToId(item.slug)}
-                  isActive={isActive(item.slug, item.href)}
+                  isActive={isActive(item.slug, item.href, item.exactMatch)}
                   isFavorito={true}
                   onToggleFavorito={handleToggleFavorito}
                   hasAccess={hasAccess(item.slug)}
@@ -809,7 +820,7 @@ export default function Sidebar() {
                 key={item.key}
                 item={item}
                 itemId={slugToId(item.slug)}
-                isActive={isActive(item.slug, item.href)}
+                isActive={isActive(item.slug, item.href, item.exactMatch)}
                 isFavorito={favoritos.includes(slugToId(item.slug))}
                 onToggleFavorito={handleToggleFavorito}
                 hasAccess={hasAccess(item.slug)}
@@ -839,7 +850,7 @@ export default function Sidebar() {
                         key={item.key}
                         item={item}
                         itemId={slugToId(item.slug)}
-                        isActive={isActive(item.slug, item.href)}
+                        isActive={isActive(item.slug, item.href, item.exactMatch)}
                         isFavorito={favoritos.includes(slugToId(item.slug))}
                         onToggleFavorito={handleToggleFavorito}
                         hasAccess={hasAccess(item.slug)}
