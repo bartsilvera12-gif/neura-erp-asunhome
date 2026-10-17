@@ -650,6 +650,7 @@ export async function getVentasDetalle(
   const tV = quoteSchemaTable(schema, "ventas");
   const tVI = quoteSchemaTable(schema, "ventas_items");
   const tF = quoteSchemaTable(schema, "facturas");
+  const tFA = quoteSchemaTable(schema, "factura_autoimpresor");
   const tCli = quoteSchemaTable(schema, "clientes");
   const d = /^\d{4}-\d{2}-\d{2}$/.test(desde) ? desde : hasta;
   const h = /^\d{4}-\d{2}-\d{2}$/.test(hasta) ? hasta : desde;
@@ -661,7 +662,10 @@ export async function getVentasDetalle(
   }>(
     `SELECT to_char((v.fecha AT TIME ZONE 'America/Asuncion'), 'YYYY-MM-DD HH24:MI') AS fecha,
             v.numero_control,
-            f.numero_factura,
+            -- N° factura: se prioriza el autoimpresor (001-001-…, lo que ve el cliente
+            -- en el talonario) y cae a la factura ERP (FAC-…). Mismo orden que el listado
+            -- de ventas; la tabla facturas suele estar vacía en ASUNHOME.
+            COALESCE(fa.numero_completo, f.numero_factura) AS numero_factura,
             cli.nombre AS cliente,
             v.vendedor_id::text AS vendedor_id,
             v.vendedor_nombre AS vendedor,
@@ -673,6 +677,7 @@ export async function getVentasDetalle(
        FROM ${tVI} vi
        JOIN ${tV} v ON v.id = vi.venta_id
        LEFT JOIN ${tF} f ON f.id = v.factura_id AND f.empresa_id = v.empresa_id
+       LEFT JOIN ${tFA} fa ON fa.venta_id = v.id AND fa.empresa_id = v.empresa_id
        LEFT JOIN ${tCli} cli ON cli.id = v.cliente_id AND cli.empresa_id = v.empresa_id
       WHERE v.empresa_id = $1::uuid
         AND (v.fecha AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
