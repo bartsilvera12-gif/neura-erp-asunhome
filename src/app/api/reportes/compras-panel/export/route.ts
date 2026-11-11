@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
-import { getComprasPanel } from "@/lib/reportes/server/compras-panel-pg";
+import { getComprasPanel, getComprasDetalle } from "@/lib/reportes/server/compras-panel-pg";
 import { asuncionRangeBoundsUtc } from "@/lib/fechas/asuncion-bounds";
 import { sheetFromRows, buildXlsxBufferSheets, xlsxResponseHeaders } from "@/lib/excel/export";
 
@@ -25,7 +25,25 @@ export async function GET(request: NextRequest) {
     const desde = sp.get("desde") ?? "";
     const hasta = sp.get("hasta") ?? "";
     const { start, end } = asuncionRangeBoundsUtc(desde || null, hasta || null);
-    const r = await getComprasPanel(schema, ctx.auth.empresa_id, { start, end, desde, hasta });
+    const proveedor = (sp.get("proveedor") ?? "").trim();
+    const rAll = await getComprasPanel(schema, ctx.auth.empresa_id, { start, end, desde, hasta });
+    const detalleAll = await getComprasDetalle(schema, ctx.auth.empresa_id, { start, end });
+    const r = proveedor
+      ? {
+          ...rAll,
+          compras: rAll.compras.filter((c) => c.proveedor_nombre === proveedor),
+          pendientes: rAll.pendientes.filter((p) => p.proveedor_nombre === proveedor),
+        }
+      : rAll;
+    const detalle = proveedor ? detalleAll.filter((d) => d.proveedor_nombre === proveedor) : detalleAll;
+    if (proveedor) {
+      r.totales = {
+        total_compras: r.compras.length,
+        monto_comprado: r.compras.reduce((s, c) => s + c.total, 0),
+        ordenes_pendientes: new Set(r.pendientes.map((p) => p.numero_oc)).size,
+        monto_pendiente: r.pendientes.reduce((s, p) => s + p.subtotal_pendiente, 0),
+      };
+    }
 
     const resumen = [
       { concepto: "Reporte", valor: "Compras" },
@@ -51,6 +69,17 @@ export async function GET(request: NextRequest) {
         { header: "Ítems", value: (c) => c.items_count, width: 8 },
         { header: "Total", value: (c) => c.total, width: 16 },
         { header: "Estado", value: (c) => c.estado, width: 14 },
+      ]),
+      sheetFromRows("Detalle de productos", detalle, [
+        { header: "Fecha", value: (d) => (d.fecha ? new Date(d.fecha) : ""), width: 20 },
+        { header: "Proveedor", value: (d) => d.proveedor_nombre, width: 30 },
+        { header: "N° Compra", value: (d) => d.numero_control, width: 16 },
+        { header: "N° Factura", value: (d) => d.numero_factura ?? "", width: 18 },
+        { header: "Producto", value: (d) => d.producto_nombre, width: 40 },
+        { header: "Cantidad", value: (d) => d.cantidad, width: 10 },
+        { header: "Costo unitario", value: (d) => d.costo_unitario, width: 16 },
+        { header: "IVA", value: (d) => d.iva_tipo, width: 10 },
+        { header: "Total", value: (d) => d.total, width: 16 },
       ]),
       sheetFromRows("Ordenados no comprados", r.pendientes, [
         { header: "Fecha OC", value: (p) => (p.fecha ? new Date(p.fecha) : ""), width: 20 },

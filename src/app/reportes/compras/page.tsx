@@ -124,7 +124,7 @@ export default function ComprasReportePage() {
         actions={
           <div className="flex items-center gap-3">
             <RangoFechasSelector desde={desde} hasta={hasta} onChange={(r) => { setDesde(r.desde); setHasta(r.hasta); }} />
-            <ExportExcelButton url={`/api/reportes/compras-panel/export?desde=${desde}&hasta=${hasta}`} />
+            <ExportExcelButton url={`/api/reportes/compras-panel/export?desde=${desde}&hasta=${hasta}${filtroProveedor ? `&proveedor=${encodeURIComponent(filtroProveedor)}` : ""}`} />
           </div>
         }
       />

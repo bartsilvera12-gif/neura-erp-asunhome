@@ -29,6 +29,48 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+export interface CompraDetalleFila {
+  fecha: string;
+  numero_control: string;
+  numero_factura: string | null;
+  proveedor_nombre: string;
+  producto_nombre: string;
+  cantidad: number;
+  costo_unitario: number;
+  iva_tipo: string;
+  total: number;
+}
+
+/** Una fila por producto de cada compra del período (no anuladas), para el Excel. */
+export async function getComprasDetalle(
+  schemaRaw: string,
+  empresaId: string,
+  rango: { start: string; end: string }
+): Promise<CompraDetalleFila[]> {
+  const schema = assertAllowedChatDataSchema(schemaRaw);
+  const tCompras = quoteSchemaTable(schema, "compras");
+  const q = await pool().query(
+    `SELECT fecha, numero_control, numero_factura, proveedor_nombre, producto_nombre,
+            cantidad, costo_unitario, iva_tipo, total
+       FROM ${tCompras}
+      WHERE empresa_id = $1::uuid AND fecha >= $2 AND fecha <= $3
+        AND anulada_at IS NULL
+      ORDER BY proveedor_nombre ASC, fecha ASC, numero_control ASC, linea_orden ASC NULLS LAST, producto_nombre ASC`,
+    [empresaId, rango.start, rango.end]
+  );
+  return q.rows.map((r: Record<string, unknown>) => ({
+    fecha: String(r.fecha),
+    numero_control: String(r.numero_control),
+    numero_factura: r.numero_factura != null ? String(r.numero_factura) : null,
+    proveedor_nombre: r.proveedor_nombre != null ? String(r.proveedor_nombre) : "—",
+    producto_nombre: r.producto_nombre != null ? String(r.producto_nombre) : "—",
+    cantidad: num(r.cantidad),
+    costo_unitario: num(r.costo_unitario),
+    iva_tipo: r.iva_tipo != null ? String(r.iva_tipo) : "",
+    total: num(r.total),
+  }));
+}
+
 export async function getComprasPanel(
   schemaRaw: string,
   empresaId: string,
