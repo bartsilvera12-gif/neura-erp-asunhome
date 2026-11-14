@@ -16,6 +16,7 @@ export default function NuevoMovimientoPage() {
     cantidad: "",
     costo_unitario: "",
     origen: "compra" as OrigenMovimiento,
+    referencia: "",
   });
 
   useEffect(() => {
@@ -68,6 +69,7 @@ export default function NuevoMovimientoPage() {
       cantidad: cantidadNum,
       costo_unitario: parseFloat(form.costo_unitario) || 0,
       origen: form.origen,
+      referencia: form.referencia.trim() || undefined,
       fecha: new Date().toISOString(),
     });
 
@@ -137,8 +139,24 @@ export default function NuevoMovimientoPage() {
                 <option value="compra">Compra</option>
                 <option value="venta">Venta</option>
                 <option value="ajuste_manual">Ajuste manual</option>
+                <option value="devolucion_proveedor">Devolución a proveedor</option>
               </select>
             </div>
+          </div>
+
+          {/* Referencia (ej. N° de nota de crédito) */}
+          <div>
+            <label className={labelClass}>
+              Referencia <span className="ml-2 text-xs text-gray-400 font-normal">(opcional)</span>
+            </label>
+            <input
+              type="text"
+              name="referencia"
+              value={form.referencia}
+              onChange={handleChange}
+              placeholder="Ej: NC 001-001-0000123"
+              className={inputClass}
+            />
           </div>
 
           {/* Cantidad + Costo unitario */}
