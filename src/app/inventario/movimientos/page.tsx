@@ -13,6 +13,7 @@ import {
   ArrowUpFromLine,
   Pencil,
   Calendar,
+  Plus,
 } from "lucide-react";
 import {
   getMovimientosPaginated,
@@ -159,6 +160,13 @@ export default function MovimientosPage() {
         </div>
         <div className="flex items-center gap-2">
           <Link
+            href="/inventario/movimientos/nuevo"
+            className="inline-flex items-center gap-2 rounded-lg bg-[#4FAEB2] px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-[#3F8E91]"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Nuevo movimiento</span>
+          </Link>
+          <Link
             href="/inventario"
             className="group inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-all hover:border-[#4FAEB2] hover:bg-[#4FAEB2]/5 hover:text-[#3F8E91]"
           >
@@ -183,7 +191,8 @@ export default function MovimientosPage() {
           <p className="text-[11.5px] text-slate-500">
             Los movimientos se generan automáticamente desde{" "}
             <span className="font-semibold text-[#3F8E91]">Compras</span> y{" "}
-            <span className="font-semibold text-[#3F8E91]">Caja</span>.
+            <span className="font-semibold text-[#3F8E91]">Caja</span>. Para ajustes o devoluciones usá{" "}
+            <span className="font-semibold text-[#3F8E91]">Nuevo movimiento</span>.
           </p>
         </div>
 
