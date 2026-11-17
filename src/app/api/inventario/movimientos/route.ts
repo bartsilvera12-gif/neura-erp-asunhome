@@ -84,9 +84,34 @@ export async function GET(request: NextRequest) {
       total = exact.count ?? data?.length ?? 0;
     }
 
-    return NextResponse.json(
-      successResponse({ movimientos: data ?? [], total })
+    // Compras: la referencia es el código interno (COMP-…). Se agrega el N° de
+    // factura del proveedor para mostrarlo en "Factura / Comprobante".
+    const filas = (data ?? []) as Array<Record<string, unknown>>;
+    const codigos = Array.from(
+      new Set(
+        filas
+          .map((m) => String(m.referencia ?? ""))
+          .filter((r) => r.startsWith("COMP-"))
+      )
     );
+    const facturaPorCodigo = new Map<string, string>();
+    if (codigos.length > 0) {
+      const { data: compras } = await ctx.supabase
+        .from("compras")
+        .select("numero_control, numero_factura")
+        .eq("empresa_id", empresaId)
+        .in("numero_control", codigos);
+      for (const c of (compras ?? []) as Array<{ numero_control: string; numero_factura: string | null }>) {
+        const nf = (c.numero_factura ?? "").trim();
+        if (nf) facturaPorCodigo.set(c.numero_control, nf);
+      }
+    }
+    const movimientos = filas.map((m) => ({
+      ...m,
+      numero_factura: facturaPorCodigo.get(String(m.referencia ?? "")) ?? null,
+    }));
+
+    return NextResponse.json(successResponse({ movimientos, total }));
   } catch (err) {
     console.error("[/api/inventario/movimientos GET]", err instanceof Error ? err.message : err);
     return NextResponse.json(errorResponse("No se pudieron cargar los movimientos."), { status: 500 });

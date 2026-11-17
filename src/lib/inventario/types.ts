@@ -100,4 +100,6 @@ export interface MovimientoInventario {
   venta_id?: string | null;
   /** ISO de anulación del movimiento (revertido). null = movimiento vigente. */
   anulado_at?: string | null;
+  /** N° de factura del proveedor (solo movimientos de compra). */
+  numero_factura?: string | null;
 }

@@ -411,6 +411,13 @@ export default function MovimientosPage() {
                               </a>
                             );
                           }
+                          if (comp.tipo === "compra" && m.numero_factura) {
+                            return (
+                              <span className="font-mono text-slate-600" title={`Compra ${comp.numero}`}>
+                                {m.numero_factura}
+                              </span>
+                            );
+                          }
                           return <span className="font-mono text-slate-600">{comp.numero}</span>;
                         })()}
                       </td>
