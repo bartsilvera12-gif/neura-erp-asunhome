@@ -92,13 +92,29 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(errorResponse(`${label}: falta el producto.`), { status: 400 });
       if (!(Number(it.cantidad) > 0))
         return NextResponse.json(errorResponse(`${label}: la cantidad debe ser mayor a 0.`), { status: 400 });
-      if (!(Number(it.costo_unitario) > 0))
+      const esObsequio = it.es_obsequio === true;
+      if (!esObsequio && !(Number(it.costo_unitario) > 0))
         return NextResponse.json(errorResponse(`${label}: el costo unitario debe ser mayor a 0.`), { status: 400 });
       // El precio de venta NO es obligatorio: para materia prima / insumos no vendibles
       // puede venir vacío o en 0. Solo rechazamos valores negativos.
       if (it.precio_venta != null && Number(it.precio_venta) < 0)
         return NextResponse.json(errorResponse(`${label}: el precio de venta no puede ser negativo.`), { status: 400 });
-      items.push({
+      items.push(esObsequio ? {
+        producto_id: String(it.producto_id),
+        producto_nombre: String(it.producto_nombre ?? ""),
+        cantidad: Number(it.cantidad) || 0,
+        costo_unitario_original: 0,
+        costo_unitario: 0,
+        iva_tipo: ivaOk(it.iva_tipo),
+        subtotal: 0,
+        monto_iva: 0,
+        total: 0,
+        precio_venta: 0,
+        margen_venta: null,
+        es_obsequio: true,
+        precio_original: Math.max(Number(it.precio_original) || 0, 0),
+        descuento_pct: 100,
+      } : {
         producto_id: String(it.producto_id),
         producto_nombre: String(it.producto_nombre ?? ""),
         cantidad: Number(it.cantidad) || 0,

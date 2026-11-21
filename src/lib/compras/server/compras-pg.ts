@@ -96,6 +96,9 @@ export interface CompraRow {
   created_by: string | null;
   usuario_nombre: string | null;
   linea_orden: number | null;
+  es_obsequio: boolean | null;
+  precio_original: string | number | null;
+  descuento_pct: string | number | null;
 }
 
 const COLS = `
@@ -107,7 +110,8 @@ const COLS = `
   numero_control, estado, fecha,
   comprobante_url, comprobante_storage_path, comprobante_nombre, comprobante_mime_type,
   anulada_at, anulada_por, anulada_motivo,
-  created_at, updated_at, created_by, usuario_nombre, linea_orden
+  created_at, updated_at, created_by, usuario_nombre, linea_orden,
+  es_obsequio, precio_original, descuento_pct
 `;
 
 export interface InsertCompraInput {
@@ -218,6 +222,12 @@ export interface CompraItemInput {
   margen_venta: number | null;
   /** Línea exacta de ordenes_compra que esta fila recibe (recepción de OC). */
   orden_compra_item_id?: string | null;
+  /** Producto recibido como obsequio: costo 0, suma stock, no toca costos ni precios. */
+  es_obsequio?: boolean;
+  /** Precio original de referencia (solo obsequio). */
+  precio_original?: number | null;
+  /** Descuento % (100 en obsequio). */
+  descuento_pct?: number | null;
 }
 
 export interface ComprasMultiResult {
@@ -265,7 +275,8 @@ export async function insertComprasConImpactoTx(
          orden_compra_numero, orden_compra_item_id,
          numero_control, estado, fecha,
          comprobante_url, comprobante_storage_path, comprobante_nombre, comprobante_mime_type,
-         created_by, usuario_nombre, linea_orden
+         created_by, usuario_nombre, linea_orden,
+         es_obsequio, precio_original, descuento_pct
        ) VALUES (
          $1::uuid, $2::uuid, $3, $4::uuid, $5,
          $6::numeric, $7, $8::numeric, $9::numeric, $10::numeric,
@@ -274,7 +285,8 @@ export async function insertComprasConImpactoTx(
          $23, $24::uuid,
          $25, $33, COALESCE($32::timestamptz, now()),
          $26, $27, $28, $29,
-         $30::uuid, $31, $34::integer
+         $30::uuid, $31, $34::integer,
+         $35::boolean, $36::numeric, $37::numeric
        )
        RETURNING ${COLS}`,
       [
@@ -293,6 +305,8 @@ export async function insertComprasConImpactoTx(
         header.fecha ?? null,
         estadoFila,
         lineaOrden + 1,
+        it.es_obsequio === true, it.es_obsequio ? (it.precio_original ?? 0) : null,
+        it.es_obsequio ? (it.descuento_pct ?? 100) : null,
       ]
     );
     insertedRows.push(compraRows[0]);
@@ -324,6 +338,15 @@ export async function insertComprasConImpactoTx(
     // precio_venta SOLO se actualiza si la compra trae un precio > 0 (productos
     // vendibles). Para materia prima / insumos sin precio (0 o vacío) mantenemos
     // el precio actual: nunca lo pisamos con 0 ni con un valor inventado.
+    if (it.es_obsequio) {
+      // Obsequio: solo suma stock. No toca costo_promedio, precio_venta ni costo habitual.
+      await client.query(
+        `UPDATE ${tP} SET stock_actual = stock_actual + $1::numeric, updated_at = now()
+          WHERE id = $2::uuid AND empresa_id = $3::uuid`,
+        [it.cantidad, it.producto_id, empresaId]
+      );
+      continue;
+    }
     await client.query(
       `UPDATE ${tP}
           SET stock_actual = stock_actual + $1::numeric,
@@ -633,7 +656,7 @@ export async function editarCompraCompleta(
         );
       }
       // Actualizar costo/precio del producto que sigue en la compra (last cost wins).
-      if (nw) {
+      if (nw && !nw.item.es_obsequio) {
         await client.query(
           `UPDATE ${tP}
               SET costo_promedio = $1::numeric,
@@ -657,13 +680,15 @@ export async function editarCompraCompleta(
            cantidad, moneda, tipo_cambio, costo_unitario_original, costo_unitario,
            iva_tipo, subtotal, monto_iva, total, precio_venta, margen_venta,
            tipo_pago, plazo_dias, nro_timbrado, numero_factura, fecha_factura, observacion,
-           numero_control, estado, fecha, created_by, usuario_nombre, linea_orden
+           numero_control, estado, fecha, created_by, usuario_nombre, linea_orden,
+           es_obsequio, precio_original, descuento_pct
          ) VALUES (
            $1::uuid, $2::uuid, $3, $4::uuid, $5,
            $6::numeric, $7, $8::numeric, $9::numeric, $10::numeric,
            $11, $12::numeric, $13::numeric, $14::numeric, $15::numeric, $16::numeric,
            $17, $18::integer, $19, $20, $21::date, $22,
-           $23, $24, COALESCE($25::timestamptz, now()), $26::uuid, $27, $28::integer
+           $23, $24, COALESCE($25::timestamptz, now()), $26::uuid, $27, $28::integer,
+           $29::boolean, $30::numeric, $31::numeric
          ) RETURNING ${COLS}`,
         [
           empresaId, header.proveedor_id, header.proveedor_nombre, it.producto_id, it.producto_nombre,
@@ -673,6 +698,8 @@ export async function editarCompraCompleta(
           header.fecha_factura ?? null, header.observacion ?? null,
           numeroControl, estadoPrev, header.fecha ?? null, header.created_by, header.usuario_nombre,
           lineaOrden + 1,
+          it.es_obsequio === true, it.es_obsequio ? (it.precio_original ?? 0) : null,
+          it.es_obsequio ? (it.descuento_pct ?? 100) : null,
         ]
       );
       insertedRows.push(cr[0]);
@@ -742,7 +769,8 @@ export async function getCompraByNumeroControl(
             precio_venta::float8 AS precio_venta, margen_venta::float8 AS margen_venta,
             tipo_pago, plazo_dias, nro_timbrado, numero_factura,
             to_char(fecha_factura,'YYYY-MM-DD') AS fecha_factura,
-            to_char(fecha,'YYYY-MM-DD') AS fecha, observacion, estado
+            to_char(fecha,'YYYY-MM-DD') AS fecha, observacion, estado,
+            es_obsequio, precio_original::float8 AS precio_original, descuento_pct::float8 AS descuento_pct
        FROM ${tC}
       WHERE empresa_id = $1::uuid AND numero_control = $2 AND anulada_at IS NULL
       ORDER BY linea_orden ASC NULLS LAST, created_at ASC, id`,

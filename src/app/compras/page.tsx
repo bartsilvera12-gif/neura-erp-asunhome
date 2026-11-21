@@ -315,7 +315,7 @@ export default function ComprasPage() {
               ) : (
                 filtrados.map((g) => {
                   const abierto = expandidos.has(g.numero_control);
-                  const multi = g.items.length > 1;
+                  const multi = g.items.length > 1 || g.items.some((x) => x.es_obsequio);
                   return (
                     <FragmentRow key={g.numero_control}>
                       <tr
@@ -416,7 +416,16 @@ export default function ComprasPage() {
                           <td className="py-2 pr-4" />
                           <td className="py-2 pr-4 text-gray-700">
                             <span className="font-medium">{it.producto_nombre}</span>
-                            <span className="ml-2 font-mono text-gray-400">{formatGs(it.costo_unitario)}/u</span>
+                            {it.es_obsequio ? (
+                              <span className="ml-2">
+                                <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">Obsequio</span>
+                                <span className="ml-2 font-mono text-gray-400">
+                                  Precio original {formatGs(it.precio_original ?? 0)} · Desc. {it.descuento_pct ?? 100}% · Neto {formatGs(0)}
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="ml-2 font-mono text-gray-400">{formatGs(it.costo_unitario)}/u</span>
+                            )}
                           </td>
                           <td className="py-2 pr-4 text-right tabular-nums text-gray-600">{it.cantidad}</td>
                           <td className="py-2 pr-4 text-right tabular-nums text-gray-700">{formatGs(it.total)}</td>

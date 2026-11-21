@@ -53,4 +53,9 @@ export interface Compra {
   /** Posición de la línea dentro de la compra (1,2,3…), para conservar el orden
    *  de carga = orden de la factura física. */
   linea_orden?: number | null;
+
+  /** Producto recibido como obsequio (costo 0, conserva precio original y descuento 100%). */
+  es_obsequio?: boolean;
+  precio_original?: number | null;
+  descuento_pct?: number | null;
 }

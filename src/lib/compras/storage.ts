@@ -20,6 +20,9 @@ interface CompraApiRow {
   anulada_at?: string | null;
   anulada_motivo?: string | null;
   linea_orden?: number | null;
+  es_obsequio?: boolean | null;
+  precio_original?: string | number | null;
+  descuento_pct?: string | number | null;
 }
 
 function mapRow(r: CompraApiRow): Compra {
@@ -55,6 +58,9 @@ function mapRow(r: CompraApiRow): Compra {
     anulada_at: r.anulada_at ?? null,
     anulada_motivo: r.anulada_motivo ?? null,
     linea_orden: r.linea_orden ?? null,
+    es_obsequio: r.es_obsequio === true,
+    precio_original: r.precio_original != null ? Number(r.precio_original) : null,
+    descuento_pct: r.descuento_pct != null ? Number(r.descuento_pct) : null,
     fecha: r.fecha,
   };
 }
@@ -99,6 +105,8 @@ export interface CompraItemPayload {
   total: number;
   precio_venta: number;
   margen_venta: number | null;
+  es_obsequio?: boolean;
+  precio_original?: number | null;
 }
 export interface CompraHeaderPayload {
   proveedor_id: string;

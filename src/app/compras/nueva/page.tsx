@@ -60,6 +60,8 @@ type LineaCompra = {
   margen_venta: number | null;
   maneja_series: boolean;
   series_texto: string;
+  es_obsequio: boolean;
+  precio_original: number; // referencia (en la moneda de la cabecera), solo obsequio
 };
 
 // ── SegmentedControl ───────────────────────────────────────────────────────────
@@ -236,6 +238,8 @@ export default function NuevaCompraPage() {
           margen_venta: it.margen_venta != null ? Number(it.margen_venta) : null,
           maneja_series: false,
           series_texto: "",
+          es_obsequio: it.es_obsequio === true,
+          precio_original: Number(it.precio_original) || 0,
         })));
       } catch { /* si falla, queda como compra nueva vacía */ }
     })();
@@ -245,6 +249,10 @@ export default function NuevaCompraPage() {
 
   // ── Recalcular derivados de una línea (usa el tipo de cambio actual) ─────────
   function recomputeLinea(base: LineaCompra): LineaCompra {
+    // Obsequio: costo neto 0, no aporta al subtotal, IVA ni total.
+    if (base.es_obsequio) {
+      return { ...base, costo_unitario_input: 0, costo_unitario_pyg: 0, subtotal: 0, monto_iva: 0, total: 0, margen_venta: null };
+    }
     const costoPyg = (base.costo_unitario_input || 0) * tipoCambioNum;
     // IVA incluido: el total de la línea es costo × cantidad (el IVA ya está dentro).
     const total = (base.cantidad || 0) * costoPyg;
@@ -257,6 +265,7 @@ export default function NuevaCompraPage() {
   useEffect(() => {
     setLineas((prev) =>
       prev.map((l) => {
+        if (l.es_obsequio) return l;
         const costoPyg = (l.costo_unitario_input || 0) * tipoCambioNum;
         const total = (l.cantidad || 0) * costoPyg;
         const { subtotal, monto_iva } = desglosarIva(total, l.iva_tipo);
@@ -304,12 +313,25 @@ export default function NuevaCompraPage() {
         margen_venta: null,
         maneja_series: prod.maneja_series === true,
         series_texto: "",
+        es_obsequio: false,
+        precio_original: 0,
       }),
     ]);
   }
 
   function editarLinea(idx: number, patch: Partial<LineaCompra>) {
     setLineas((prev) => prev.map((l, i) => (i === idx ? recomputeLinea({ ...l, ...patch }) : l)));
+  }
+
+  function toggleObsequio(idx: number, checked: boolean) {
+    setLineas((prev) => prev.map((l, i) => {
+      if (i !== idx) return l;
+      if (checked) {
+        // El costo cargado pasa a ser el precio original de referencia.
+        return recomputeLinea({ ...l, es_obsequio: true, precio_original: l.costo_unitario_input || l.precio_original, precio_venta: l.precio_venta });
+      }
+      return recomputeLinea({ ...l, es_obsequio: false, costo_unitario_input: l.precio_original || 0 });
+    }));
   }
 
   function handleQuitarLinea(idx: number) {
@@ -327,9 +349,9 @@ export default function NuevaCompraPage() {
     if (lineas.length === 0) return setErrorSubmit("Agregá al menos un producto a la compra.");
     if (cab.moneda === "USD" && tipoCambioNum <= 0)
       return setErrorSubmit("Cargá el tipo de cambio (USD → Gs.).");
-    const invalida = lineas.find((l) => l.cantidad <= 0 || l.costo_unitario_pyg <= 0);
+    const invalida = lineas.find((l) => l.cantidad <= 0 || (!l.es_obsequio && l.costo_unitario_pyg <= 0));
     if (invalida) return setErrorSubmit(`Revisá "${invalida.producto_nombre}": la cantidad y el costo deben ser mayores a 0.`);
-    const sinPrecio = lineas.find((l) => !l.es_insumo_no_vendible && l.precio_venta <= 0);
+    const sinPrecio = lineas.find((l) => !l.es_obsequio && !l.es_insumo_no_vendible && l.precio_venta <= 0);
     if (sinPrecio) return setErrorSubmit(`Cargá el precio de venta de "${sinPrecio.producto_nombre}".`);
     // Series: la cantidad de números de serie debe coincidir con la cantidad comprada.
     for (const l of lineas) {
@@ -357,6 +379,8 @@ export default function NuevaCompraPage() {
       total: l.total,
       precio_venta: l.precio_venta,
       margen_venta: l.margen_venta ?? 0,
+      es_obsequio: l.es_obsequio,
+      precio_original: l.es_obsequio ? l.precio_original : null,
     }));
 
     setSubmitting(true);
@@ -846,6 +870,12 @@ export default function NuevaCompraPage() {
                           {l.es_insumo_no_vendible && (
                             <span className="mt-0.5 inline-block rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">Materia prima</span>
                           )}
+                          <label className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-emerald-700 cursor-pointer select-none">
+                            <input type="checkbox" checked={l.es_obsequio}
+                              onChange={(e) => toggleObsequio(i, e.target.checked)}
+                              className="h-3.5 w-3.5 accent-emerald-600" />
+                            Obsequio
+                          </label>
                           {l.maneja_series && (
                             <div className="mt-1.5">
                               <textarea
@@ -865,7 +895,16 @@ export default function NuevaCompraPage() {
                             className="w-14 rounded-md border border-slate-200 px-2 py-1.5 text-right text-sm outline-none focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20" />
                         </td>
                         <td className="py-2 px-2">
-                          {cab.moneda === "USD" ? (
+                          {l.es_obsequio ? (
+                            <div className="space-y-1">
+                              <div className="text-right text-[10px] text-gray-500">Precio original</div>
+                              <MontoInput value={l.precio_original}
+                                onChange={(n) => editarLinea(i, { precio_original: n })}
+                                decimals={cab.moneda === "USD"}
+                                className="w-24 rounded-md border border-slate-200 px-2 py-1.5 text-right text-sm outline-none focus:border-[#4FAEB2] focus:ring-2 focus:ring-[#4FAEB2]/20" />
+                              <div className="text-right text-[10px] font-semibold text-emerald-700">Desc. 100% · Costo neto 0</div>
+                            </div>
+                          ) : cab.moneda === "USD" ? (
                             // USD: input decimal nativo (evita que el formateo de miles se coma
                             // los decimales; ej. USD 197.88 se ingresa limpio).
                             <input
@@ -894,6 +933,9 @@ export default function NuevaCompraPage() {
                           </select>
                         </td>
                         <td className="py-2 px-2">
+                          {l.es_obsequio ? (
+                            <div className="text-right text-[10px] text-gray-400">No modifica el precio de venta</div>
+                          ) : (<>
                           <MontoInput value={l.precio_venta}
                             onChange={(n) => editarLinea(i, { precio_venta: n })}
                             decimals={false}
@@ -902,6 +944,7 @@ export default function NuevaCompraPage() {
                           {l.margen_venta !== null && (
                             <div className={`mt-0.5 text-right text-[10px] ${margenColor(l.margen_venta)}`}>Margen {l.margen_venta.toFixed(1)}%</div>
                           )}
+                          </>)}
                         </td>
                         <td className="py-2 px-2 text-right tabular-nums font-semibold text-gray-800 whitespace-nowrap">{formatGs(l.total)}</td>
                         <td className="py-2 px-2 text-center">
