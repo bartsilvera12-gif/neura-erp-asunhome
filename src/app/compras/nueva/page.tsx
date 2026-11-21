@@ -1073,8 +1073,9 @@ function ProductoBuscador({
     onPick(p);
     setQuery("");
     setHl(-1);
-    // Mantener el buscador enfocado y abierto para cargar el siguiente.
-    setTimeout(() => inputRef.current?.focus(), 0);
+    // Cerrar la lista para ver la línea agregada; al volver a tocar el buscador se abre de nuevo.
+    setOpen(false);
+    inputRef.current?.blur();
   }
 
   return (
