@@ -16,7 +16,7 @@ function escapeHtml(s: unknown): string {
 }
 function fmtGs(v: number): string { return Math.round(v || 0).toLocaleString("es-PY"); }
 
-function fechaLarga(iso: string, ciudad = "HERNANDARIAS"): string {
+function fechaLarga(iso: string, ciudad = "ASUNCIÓN – RECOLETA"): string {
   try {
     const d = new Date(iso);
     const py = new Date(d.getTime() - 3 * 60 * 60 * 1000);

@@ -30,7 +30,7 @@ function fmtGs(v: number): string {
 }
 
 /** Fecha larga tipo "HERNANDARIAS, 20 DE JULIO DEL 2026". Forzada a UTC-3 (Paraguay). */
-function fechaLarga(iso: string, ciudad = "HERNANDARIAS"): string {
+function fechaLarga(iso: string, ciudad = "ASUNCIÓN – RECOLETA"): string {
   try {
     const d = new Date(iso);
     const py = new Date(d.getTime() - 3 * 60 * 60 * 1000);
