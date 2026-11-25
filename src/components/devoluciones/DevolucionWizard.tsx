@@ -46,6 +46,7 @@ export default function DevolucionWizard({ ventaId, onClose, onDone }: Props) {
   const [resolucion, setResolucion] = useState<ResolucionDevolucion>("reembolso");
   const [metodo, setMetodo] = useState<MetodoReembolso>("efectivo");
   const [cambios, setCambios] = useState<CambioSel[]>([]);
+  const [yaFacturado, setYaFacturado] = useState(false);
   const [motivo, setMotivo] = useState("");
   // Buscador de productos (mismo endpoint que Caja)
   const [q, setQ] = useState("");
@@ -105,7 +106,7 @@ export default function DevolucionWizard({ ventaId, onClose, onDone }: Props) {
     () => (resolucion === "cambio" ? cambios.reduce((a, c) => a + c.precio * c.cantidad, 0) : 0),
     [resolucion, cambios]
   );
-  const diferencia = resolucion === "cambio" ? totalEntregado - totalDevuelto : -totalDevuelto;
+  const diferencia = resolucion === "cambio" ? (yaFacturado ? 0 : totalEntregado - totalDevuelto) : -totalDevuelto;
 
   function setCantidad(id: string, v: number, max: number) {
     const n = Math.max(0, Math.min(max, Number.isFinite(v) ? v : 0));
@@ -145,7 +146,8 @@ export default function DevolucionWizard({ ventaId, onClose, onDone }: Props) {
             condicion: cond[l.venta_item_id] ?? "buen_estado",
             reintegra_stock: (cond[l.venta_item_id] ?? "buen_estado") !== "danado",
           })),
-          cambios: resolucion === "cambio" ? cambios.map((c) => ({ producto_id: c.producto_id, cantidad: c.cantidad })) : [],
+          cambio_ya_facturado: resolucion === "cambio" && yaFacturado,
+          cambios: resolucion === "cambio" && !yaFacturado ? cambios.map((c) => ({ producto_id: c.producto_id, cantidad: c.cantidad })) : [],
         }),
       });
       const j = await r.json();
@@ -156,7 +158,7 @@ export default function DevolucionWizard({ ventaId, onClose, onDone }: Props) {
   }
 
   const puedePaso2 = seleccion.length > 0;
-  const puedeConfirmar = puedePaso2 && (resolucion === "reembolso" || cambios.length > 0);
+  const puedeConfirmar = puedePaso2 && (resolucion === "reembolso" || yaFacturado || cambios.length > 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 backdrop-blur-sm">
@@ -279,6 +281,11 @@ export default function DevolucionWizard({ ventaId, onClose, onDone }: Props) {
 
               {resolucion === "cambio" && (
                 <div className="space-y-2">
+                  <label className="flex items-center gap-2 rounded-lg border border-slate-200 p-2 text-xs font-semibold text-slate-700">
+                    <input type="checkbox" checked={yaFacturado} onChange={(e) => setYaFacturado(e.target.checked)} />
+                    El producto de reemplazo ya se facturó aparte (sin reembolso ni movimiento de caja)
+                  </label>
+                  {!yaFacturado && (<>
                   <label className="text-xs font-semibold text-slate-600">Producto de reemplazo</label>
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#4FAEB2]" />
@@ -319,6 +326,7 @@ export default function DevolucionWizard({ ventaId, onClose, onDone }: Props) {
                       </button>
                     </div>
                   ))}
+                  </>)}
                 </div>
               )}
 
@@ -326,7 +334,7 @@ export default function DevolucionWizard({ ventaId, onClose, onDone }: Props) {
               <div className="space-y-1 rounded-xl bg-slate-50 p-4 text-sm">
                 <div className="flex justify-between"><span className="text-slate-500">Valor devuelto</span><span className="tabular-nums font-medium">{gs(totalDevuelto)}</span></div>
                 {resolucion === "cambio" && (
-                  <div className="flex justify-between"><span className="text-slate-500">Valor del nuevo producto</span><span className="tabular-nums font-medium">{gs(totalEntregado)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Valor del nuevo producto</span><span className="tabular-nums font-medium">{yaFacturado ? "Facturado aparte" : gs(totalEntregado)}</span></div>
                 )}
                 <div className={`flex justify-between border-t border-slate-200 pt-1.5 font-bold ${
                   diferencia > 0 ? "text-amber-700" : diferencia < 0 ? "text-[#3F8E91]" : "text-slate-600"}`}>

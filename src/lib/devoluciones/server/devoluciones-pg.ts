@@ -363,6 +363,8 @@ export async function crearDevolucion(
 
     // ── 5) Diferencia. >0 el cliente paga; <0 se le devuelve dinero.
     const resolucion: ResolucionDevolucion = input.resolucion;
+    const cambioYaFacturado = resolucion === "cambio" && input.cambio_ya_facturado === true && cambiosCalc.length === 0;
+    if (cambioYaFacturado) totalEntregado = totalDevuelto; // el reemplazo ya tiene su propia factura
     const diferencia = resolucion === "cambio" ? round2(totalEntregado - totalDevuelto) : round2(-totalDevuelto);
     const metodo: MetodoReembolso = input.metodo ?? "efectivo";
     const requiereEfectivo = diferencia !== 0 && metodo === "efectivo";

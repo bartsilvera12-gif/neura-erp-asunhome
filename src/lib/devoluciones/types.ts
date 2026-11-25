@@ -56,6 +56,8 @@ export interface CrearDevolucionInput {
   items: DevolucionItemInput[];
   /** Solo si resolucion = cambio. */
   cambios: DevolucionCambioInput[];
+  /** Cambio cuyo producto nuevo ya se facturó aparte: sin salida de stock, sin reembolso ni movimiento de caja. */
+  cambio_ya_facturado?: boolean;
   /** Metodo del reembolso o del cobro de la diferencia. */
   metodo: MetodoReembolso;
   /** Clave para idempotencia (doble clic / reintento). */

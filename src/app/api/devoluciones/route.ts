@@ -65,6 +65,7 @@ export async function POST(request: NextRequest) {
       cambios: Array.isArray(body.cambios)
         ? body.cambios.map((c) => ({ producto_id: String(c.producto_id), cantidad: Number(c.cantidad) || 0 }))
         : [],
+      cambio_ya_facturado: body.cambio_ya_facturado === true,
       metodo:
         body.metodo === "tarjeta" ? "tarjeta" : body.metodo === "transferencia" ? "transferencia" : "efectivo",
       idempotency_key: body.idempotency_key,
