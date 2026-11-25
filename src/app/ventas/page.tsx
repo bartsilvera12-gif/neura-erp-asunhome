@@ -663,7 +663,7 @@ function AnularVentaModal({
           <p className="mt-1 text-xs text-red-700">
             {venta.estado === "devuelta_total" || venta.estado === "parcialmente_devuelta"
               ? "Se van a anular también las devoluciones asociadas, revirtiendo stock y caja para dejar todo como antes de la operación. Esta acción no se puede deshacer."
-              : "Se va a devolver el stock al inventario y revertir el movimiento de caja de esta venta. Esta acción no se puede deshacer."}
+              : "Se va a devolver el stock al inventario y revertir el movimiento de caja de esta venta. Si la caja de la venta ya está cerrada (solo administradores), el cierre anterior no se modifica. Esta acción no se puede deshacer."}
           </p>
         </div>
         <div className="p-5 space-y-3">

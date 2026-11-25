@@ -54,7 +54,8 @@ export async function anularVentaPg(
   empresaId: string,
   ventaId: string,
   usuario: { id: string | null; nombre: string | null },
-  motivo: string | null
+  motivo: string | null,
+  opts?: { permitirCajaCerrada?: boolean }
 ): Promise<AnularVentaResult> {
   const schema = assertAllowedChatDataSchema(schemaRaw);
   const tV = quoteSchemaTable(schema, "ventas");
@@ -115,9 +116,13 @@ export async function anularVentaPg(
       `SELECT estado FROM ${tCajas} WHERE id = $1::uuid AND empresa_id = $2::uuid`,
       [venta.caja_id, empresaId]
     );
-    if (!cQ.rows[0] || String(cQ.rows[0].estado) !== "abierta") {
+    const cajaAbierta = !!cQ.rows[0] && String(cQ.rows[0].estado) === "abierta";
+    if (!cajaAbierta && !opts?.permitirCajaCerrada) {
       await client.query("ROLLBACK");
-      throw new AnularVentaError("caja_cerrada", "No se puede anular: la caja de esta venta ya está cerrada.");
+      throw new AnularVentaError(
+        "caja_cerrada",
+        "No se puede anular: la caja de esta venta ya está cerrada. Solo un administrador puede anular ventas de cajas cerradas."
+      );
     }
 
     // ── 2b) Anular las devoluciones confirmadas de esta venta DENTRO de la MISMA
@@ -188,12 +193,15 @@ export async function anularVentaPg(
       [empresaId, ventaId]
     );
 
-    // ── 5) Anular movimientos de caja vinculados a la venta.
-    await client.query(
-      `UPDATE ${tCM} SET anulado_at = now(), anulado_por = $1::uuid
-        WHERE empresa_id = $2::uuid AND venta_id = $3::uuid AND anulado_at IS NULL`,
-      [usuario.id, empresaId, ventaId]
-    );
+    // ── 5) Anular movimientos de caja vinculados a la venta. Si la caja ya está
+    // cerrada NO se tocan: el cierre/arqueo anterior queda como se hizo.
+    if (cajaAbierta) {
+      await client.query(
+        `UPDATE ${tCM} SET anulado_at = now(), anulado_por = $1::uuid
+          WHERE empresa_id = $2::uuid AND venta_id = $3::uuid AND anulado_at IS NULL`,
+        [usuario.id, empresaId, ventaId]
+      );
+    }
 
     // ── 6) Si era a crédito, anular la cuenta por cobrar (no falla si no hay).
     await client.query(

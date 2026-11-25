@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
+import { getTenantSupabaseFromAuthWithRol } from "@/lib/supabase/tenant-api";
+import { isAdmin } from "@/lib/middleware/auth";
 import { successResponse, errorResponse } from "@/lib/api/response";
 import { API_ERRORS } from "@/lib/api/errors";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
@@ -23,7 +24,7 @@ export async function POST(
 ) {
   try {
     const { id: ventaId } = await ctxParams.params;
-    const ctx = await getTenantSupabaseFromAuth(request);
+    const ctx = await getTenantSupabaseFromAuthWithRol(request);
     if (!ctx) return NextResponse.json(errorResponse(API_ERRORS.UNAUTHORIZED), { status: 401 });
 
     let body: unknown;
@@ -46,7 +47,8 @@ export async function POST(
         id: ctx.auth.usuarioCatalogId ?? null,
         nombre: ctx.auth.nombre ?? ctx.auth.user?.email ?? null,
       },
-      motivo
+      motivo,
+      { permitirCajaCerrada: isAdmin(ctx.auth) }
     );
 
     return NextResponse.json(
