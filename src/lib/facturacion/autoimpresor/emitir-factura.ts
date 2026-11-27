@@ -147,6 +147,33 @@ export async function getFacturaAutoimpresor(
 }
 
 /**
+ * Fecha de emisión de la factura autoimpresor de la venta, como mediodía UTC
+ * del día (ISO) para que no cambie de día al pasar a hora Paraguay. Null si no hay.
+ * Best-effort: ante cualquier error devuelve null (se usa la fecha de la venta).
+ */
+export async function getFechaEmisionFactura(
+  schemaRaw: string,
+  empresaId: string,
+  ventaId: string
+): Promise<string | null> {
+  try {
+    const schema = assertAllowedChatDataSchema(schemaRaw);
+    const pool = getChatPostgresPool();
+    if (!pool) return null;
+    const t = quoteSchemaTable(schema, "factura_autoimpresor");
+    const { rows } = await pool.query(
+      `SELECT to_char(COALESCE(fecha_emision, (emitida_at AT TIME ZONE 'America/Asuncion')::date), 'YYYY-MM-DD') AS f
+         FROM ${t} WHERE empresa_id = $1::uuid AND venta_id = $2::uuid LIMIT 1`,
+      [empresaId, ventaId]
+    );
+    const f = rows[0]?.f as string | undefined;
+    return f ? `${f}T12:00:00.000Z` : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Emite (o devuelve si ya existía) la factura autoimpresor de una venta.
  * Asigna el número correlativo e incrementa numero_actual atómicamente.
  * Lanza EmisionBloqueadaError si la config no permite emitir.

@@ -20,7 +20,7 @@ import {
 } from "@/lib/facturacion/preimpresa/factura-preimpresa-layout";
 import { renderFacturaPreimpresaPdf } from "@/lib/facturacion/preimpresa/factura-preimpresa-pdf";
 import { numeroALetras } from "@/lib/documentos/numero-a-letras";
-import { emitirFacturaAutoimpresor, EmisionBloqueadaError } from "@/lib/facturacion/autoimpresor/emitir-factura";
+import { emitirFacturaAutoimpresor, EmisionBloqueadaError, getFechaEmisionFactura } from "@/lib/facturacion/autoimpresor/emitir-factura";
 
 /** Fecha corta dd/mm/aaaa forzada a hora de Paraguay (UTC-3). */
 function fechaCorta(iso: string): string {
@@ -95,6 +95,10 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
       .maybeSingle();
     if (!venta) return new NextResponse("Venta no encontrada", { status: 404 });
     const v = venta as Record<string, unknown>;
+    // La factura puede haberse re-emitida otro día: se imprime SU fecha de emisión.
+    const fechaEmisionFactura = await getFechaEmisionFactura(
+      await fetchDataSchemaForEmpresaId(empresaId), empresaId, ventaId
+    );
 
     // 2) Ítems
     const { data: items } = await sb
@@ -176,7 +180,7 @@ export async function GET(request: NextRequest, ctxParams: { params: Promise<{ i
     const observacion = obsPartes.join(" · ");
 
     const data: FacturaPreimpresaData = {
-      fecha: fechaCorta(String(v.fecha ?? "")),
+      fecha: fechaCorta(fechaEmisionFactura ?? String(v.fecha ?? "")),
       nombre: cliente.nombre,
       domicilio: cliente.direccion,
       observacion,

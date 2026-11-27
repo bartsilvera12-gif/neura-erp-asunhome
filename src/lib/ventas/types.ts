@@ -84,6 +84,8 @@ export interface Venta {
   factura_id?: string | null;
   /** Número de la factura ERP (FAC-XXXXXX) si `factura_id` está seteado. */
   numero_factura?: string | null;
+  /** Fecha de emisión (YYYY-MM-DD) de la factura autoimpresor, si existe. La `fecha` de la venta es la de creación. */
+  fecha_factura?: string | null;
   /** Estado SIFEN de la factura electrónica (borrador, firmado, aprobado, …) si existe. */
   factura_estado_sifen?: string | null;
 

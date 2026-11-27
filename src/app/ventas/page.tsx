@@ -442,6 +442,11 @@ export default function VentasPage() {
                       </td>
                       <td className="py-4 pr-4 text-gray-500 text-xs tabular-nums align-middle">
                         {formatFecha(v.fecha)}
+                        {v.fecha_factura && v.fecha_factura !== v.fecha.slice(0, 10) && (
+                          <div className="mt-0.5 text-[11px] font-medium text-slate-700">
+                            Factura: {v.fecha_factura.split("-").reverse().join("/")}
+                          </div>
+                        )}
                       </td>
                       <td className="py-4 text-center align-middle" onClick={(e) => e.stopPropagation()}>
                         <div className="inline-flex items-center gap-1.5">

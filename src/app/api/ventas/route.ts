@@ -124,20 +124,22 @@ export async function GET(request: NextRequest) {
     // directo (no PostgREST) para no depender del cache de esquema de PostgREST
     // cuando la tabla se agrega en caliente. Best-effort.
     const numeroAutoByVentaMap = new Map<string, string>();
-    const ventaIdsForAuto = ((ventasQ.data ?? []) as VentaRow[]).map((v) => v.id);
+    const fechaAutoByVentaMap = new Map<string, string>();
+    const ventaIdsForAuto =((ventasQ.data ?? []) as VentaRow[]).map((v) => v.id);
     if (ventaIdsForAuto.length > 0) {
       try {
         const schema = assertAllowedChatDataSchema(await fetchDataSchemaForEmpresaId(empresaId));
         const pool = getChatPostgresPool();
         if (pool) {
           const t = quoteSchemaTable(schema, "factura_autoimpresor");
-          const faRes = await pool.query<{ venta_id: string; numero_completo: string | null }>(
-            `SELECT venta_id::text, numero_completo FROM ${t}
+          const faRes = await pool.query<{ venta_id: string; numero_completo: string | null; fecha_emision: string | null }>(
+            `SELECT venta_id::text, numero_completo, to_char(COALESCE(fecha_emision, emitida_at::date), 'YYYY-MM-DD') AS fecha_emision FROM ${t}
               WHERE empresa_id = $1::uuid AND venta_id = ANY($2::uuid[])`,
             [empresaId, ventaIdsForAuto]
           );
           for (const row of faRes.rows) {
             if (row.numero_completo) numeroAutoByVentaMap.set(row.venta_id, row.numero_completo);
+            if (row.fecha_emision) fechaAutoByVentaMap.set(row.venta_id, row.fecha_emision);
           }
         }
       } catch (e) {
@@ -239,6 +241,7 @@ export async function GET(request: NextRequest) {
         vendedor_id: (r as unknown as { vendedor_id?: string | null }).vendedor_id ?? null,
         vendedor_nombre: (r as unknown as { vendedor_nombre?: string | null }).vendedor_nombre ?? null,
         factura_id: r.factura_id ?? null,
+        fecha_factura: fechaAutoByVentaMap.get(r.id) ?? null,
         // Prioridad: el número FÍSICO de la preimpresa (autoimpresor, 001-001-…) es el
         // que va en el talonario y ve el cliente; se muestra primero. El número ERP
         // (FAC-…) queda como respaldo si la venta no tuviera autoimpresor.

@@ -13,6 +13,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { fetchDataSchemaForEmpresaId } from "@/lib/supabase/empresa-data-schema";
+import { getFechaEmisionFactura } from "@/lib/facturacion/autoimpresor/emitir-factura";
 import { getEmisorDatos } from "@/lib/documentos/emisor";
 import { getTenantSupabaseFromAuth } from "@/lib/supabase/tenant-api";
 
@@ -194,6 +195,7 @@ export async function GET(
     const ivaTotal = iva5Liq + iva10Liq;
 
     const v = venta as Record<string, unknown>;
+    const fechaEmisionFactura = await getFechaEmisionFactura(emisorSchema, empresaId, ventaId);
     // Retención de IVA (agente de retención): descuenta del total → neto a cobrar.
     const retPct = Number(v.retencion_iva_pct) || 0;
     const retMonto = Number(v.retencion_iva_monto) || 0;
@@ -370,7 +372,7 @@ export async function GET(
           ${emisor.telefono ? `<div>Tel.: ${escapeHtml(emisor.telefono)}</div>` : ""}
         </div>
       </div>
-      <div class="fecha-top">${escapeHtml(fechaLarga(String(v.fecha ?? "")))}</div>
+      <div class="fecha-top">${escapeHtml(fechaLarga(fechaEmisionFactura ?? String(v.fecha ?? "")))}</div>
     </div>
 
     <div class="info">
